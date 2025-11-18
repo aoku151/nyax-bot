@@ -25,15 +25,14 @@ async def main():
                 n_req = await response.json()
         print(n_req)
         code = n_req['code']
-
-        user_page = await get_user(sc_name)
-        await user_page.post_comment(f"{code}")
+        await session.user.post_comment(f"{code}")
 
         nyax_auth_second = {"type": "verifyComment", "username": sc_name, "code": code}
         async with aiohttp.ClientSession() as session:
             async with session.post(nx_auth_url, json=nyax_auth_second, headers=nyax_auth_header) as response:
                 n_req = await response.json()
         response = supabase.auth.set_session(n_req.jwt, n_req.jwt)
+        await session.client_close()
     except Exception as e:
         print(e)
 
