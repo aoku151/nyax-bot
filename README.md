@@ -1,10 +1,12 @@
 # NyaX Bot
+---
+※ このプロジェクトは現在非公式です。
 
-## ※ このプロジェクトは現在非公式です。
+---
 
-# ソフトウェア
+# Software
 - Python 3.12.9
 - Supabase
 - aiohttp
-- Scapi
+- Scapi (https://github.com/kakeruzoku/scapi)
 - Discord.py
