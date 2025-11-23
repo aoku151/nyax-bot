@@ -136,6 +136,19 @@ async def main():
         currentUser = await get_currentUser(supabase)
         log.debug(currentUser)
 
+        @bot.event
+        async def on_ready():
+            global log_channel
+            log.info(f"Discord:{bot.user}としてログインしました^o^")
+            try:
+                synced = await bot.tree.sync()
+                log.info(f"{len(synced)}個のコマンドを同期しました。")
+                log_channel = bot.get_guild(1440680053867286560).get_channel(1440680171890933863)
+            except Exception as e:
+                log.error(f"コマンドの同期中にエラーが発生しました。\n{e}")
+            asyncio.create_task(console_input())
+            await supabase.rpc("create_post", {"p_content": "NyaXBotが起動しました!", "p_reply_id": None, "p_repost_to": None, "p_attachments": None}).execute()
+
         async def handle_notification():
             global currentUser
             try:
@@ -168,19 +181,7 @@ async def main():
             .on_postgres_changes("UPDATE", schema="public", table="user", filter=f"id=eq.{currentUser['id']}", callback=handle_notification)
             .subscribe()
         )
-
-        @bot.event
-        async def on_ready():
-            global log_channel
-            log.info(f"Discord:{bot.user}としてログインしました^o^")
-            try:
-                synced = await bot.tree.sync()
-                log.info(f"{len(synced)}個のコマンドを同期しました。")
-                log_channel = bot.get_guild(1440680053867286560).get_channel(1440680171890933863)
-            except Exception as e:
-                log.error(f"コマンドの同期中にエラーが発生しました。\n{e}")
-            asyncio.create_task(console_input())
-            await supabase.rpc("create_post", {"p_content": "NyaXBotが起動しました!", "p_reply_id": None, "p_repost_to": None, "p_attachments": None}).execute()
+        
         await bot.start(DISCORD_TOKEN)
     except Exception as e:
         log.error(f"BOTの起動中にエラーが発生しました\n{e}")
