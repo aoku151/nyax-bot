@@ -74,7 +74,7 @@ async def get_supabase() -> AsyncClient:
             await supabase.auth.set_session(response['jwt'], response['jwt'])
             setSession("sp_key", response['jwt'])
             log.info("セッションは有効です。認証に成功しました!")
-            await sc.client_close()
+            await sc.close()
             return supabase
         except Exception as e:
             log.error(f"NyaXのログイン中にエラーが発生しました。\n{e}")
@@ -126,6 +126,8 @@ log_channel: discord.TextChannel = None
 
 messages = []
 
+supabase: AsyncClient = None
+
 @tasks.loop(seconds=60)
 async def send_nyax():
     global messages
@@ -133,13 +135,17 @@ async def send_nyax():
     try:
         mes = ""
         for i in messages:
-            
+            mes = mes + i + "\n"
+        if (mes != ""):
+            await supabase.rpc("create_post", {"p_content": mes, "p_reply_id": None, "p_repost_to": None, "p_attachments": None}).execute()
+    except Exception as e:
+        log.error(f"NyaXの送信中にエラーが発生しました。\n{e}")
 
 async def main():
     log = main_log
-    global currentUser, session, messages
+    global currentUser, session, messages, supabase
     try:
-        supabase: AsyncClient = await get_supabase()
+        supabase = await get_supabase()
         session = await supabase.auth.get_session()
 
         @bot.event
@@ -152,6 +158,7 @@ async def main():
                 log_channel = bot.get_guild(1440680053867286560).get_channel(1440680171890933863)
             except Exception as e:
                 log.error(f"コマンドの同期中にエラーが発生しました。\n{e}")
+            send_nyax.start()
             asyncio.create_task(console_input())
             # await supabase.rpc("create_post", {"p_content": "NyaXBotが起動しました!", "p_reply_id": None, "p_repost_to": None, "p_attachments": None}).execute()
         @bot.event
