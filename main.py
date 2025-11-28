@@ -1,113 +1,145 @@
 import os
 from typing import Tuple
+import uuid
+import logging
 from dotenv import load_dotenv
 from supabase import acreate_client, AsyncClient
+import supabase as Supabase
 import scapi
 import asyncio
 import aiohttp
 import aioconsole
 import json
 import discord
+from datetime import datetime, timezone
 from discord.ext import commands
 from discord import app_commands
+from func.session import Sessions
+from func.log import get_log, stream_handler
+from func.data import dmInviteMessage
 load_dotenv()
 
-sp_url: str = os.getenv("SUPABASE_URL")
-sp_key: str = os.getenv("SUPABASE_ANON_KEY")
-sc_name: str = os.getenv("SCRATCH_USER")
-sc_pass: str = os.getenv("SCRATCH_PASSWORD")
 DISCORD_TOKEN: str = os.getenv("DISCORD_TOKEN")
-nx_auth_url = "https://mnvdpvsivqqbzbtjtpws.supabase.co/functions/v1/scratch-auth-handler"
 sessions_path = "sessions.json"
+sessions = Sessions(sessions_path)
 
 intents = discord.Intents.all()
 bot = commands.Bot(command_prefix="!", intents=intents)
 
-def getSession(key):
-    with open(sessions_path, "r") as f:
-        data = json.load(f)
-        return data[key]
-def setSession(key, value):
-    with open(sessions_path, "r") as f:
-        data = json.load(f)
-    data[key] = value
-    with open(sessions_path, "w") as f:
-        json.dump(data, f, indent=4)
-
-async def get_supabase() -> AsyncClient:
-    try:
-        supabase: AsyncClient = await acreate_client(sp_url, sp_key)
-        sp_jwt = getSession("sp_key")
-        await supabase.auth.set_session(sp_jwt, sp_jwt)
-        print("セッションは有効です。認証に成功しました!")
-        return supabase
-    except Exception:
-        try:
-            print("セッションの有効期限が切れているので、新しいセッションを作成します...")
-            supabase: AsyncClient = await acreate_client(sp_url, sp_key)
-            sc:scapi.Session = await get_scratch()
-            header = {"Content-Type": "application/json"}
-            first = {"type": "generateCode", "username": sc_name}
-            print("ログインコードを取得しています...")
-            async with aiohttp.ClientSession() as session:
-                async with session.post(nx_auth_url, json=first, headers=header) as res:
-                    response = await res.json()
-            print(f"ログインコードを取得しました!{response['code']}")
-            await sc.user.post_comment(f"{response['code']}")
-            second = {"type": "verifyComment", "username": sc_name, "code": response['code']}
-            print("セッションを取得しています...")
-            async with aiohttp.ClientSession() as session:
-                async with session.post(nx_auth_url, json=second, headers=header) as res:
-                    response = await res.json()
-            print("セッションを取得しました!")
-            await supabase.auth.set_session(response['jwt'], response['jwt'])
-            setSession("sp_key", response['jwt'])
-            print("セッションは有効です。認証に成功しました!")
-            await sc.client_close()
-            return supabase
-        except Exception as e:
-            print(f"NyaXのログイン中にエラーが発生しました。\n{e}")
-async def get_scratch():
-    try:
-        print("Scratchにログインしています...")
-        sc_key = getSession("sc_key")
-        session:scapi.Session = await scapi.session_login(sc_key)
-        print(f"Scratchにログインしました!:{session.username}")
-        return session
-    except Exception:
-        try:
-            print("セッションが無効です。再ログインしています...")
-            session:scapi.Session = await scapi.login(sc_name, sc_pass)
-            setSession("sc_key", session.session_id)
-            print(f"Scratchにログインしました!:{session.username}")
-            return session
-        except Exception as e:
-            print(f"エラー:Scratchのログインに失敗しました\n{e}")
+main_log = get_log("Main")
 
 async def console_input():
     while True:
         line = await aioconsole.ainput("type:")
         if line.strip() == "finish":
-            print("Stop.")
+            main_log.info("Stop.")
             await bot.close()
             break
 
-async def main():
+supabase: AsyncClient = None
+currentUser = None
+session = None
+
+log_channel: discord.TextChannel = None
+
+async def handle_notification_message(notification):
+    log = get_log("handle_notification_message")
     try:
-        supabase: AsyncClient = await get_supabase()
+        if("あなたをDMに招待しました" in notification["message"]):
+            dmid = notification["open"][4:]
+            message = {
+                "id": str(uuid.uuid4()),
+                "time": datetime.now(timezone.utc).isoformat(timespec="microseconds"),
+                "userid": currentUser["id"],
+                "content": dmInviteMessage,
+                "attachments": [],
+                "read": [currentUser["id"]]
+            }
+            response = (
+                await supabase.rpc("append_to_dm_post", {
+                    "dm_id_in": dmid,
+                    "new_message_in": message
+                })
+                .execute()
+            )
+    except Exception as e:
+        log.error(f"通知のメッセージ処理中にエラーが発生しました\n{e}")
+
+async def main():
+    log = main_log
+    global currentUser, supabase, session
+    try:
+        supabase, session = await sessions.get_supabase()
+        # session = await supabase.auth.get_session()
+        currentUser = await sessions.get_currentUser(supabase, session)
+        # log.debug(currentUser)
+
         @bot.event
         async def on_ready():
-            print(f"Discord:{bot.user}としてログインしました^o^")
+            global log_channel
+            log.info(f"Discord:{bot.user}としてログインしました^o^")
             try:
                 synced = await bot.tree.sync()
-                print(f"{len(synced)}個のコマンドを同期しました。")
+                log.info(f"{len(synced)}個のコマンドを同期しました。")
+                log_channel = bot.get_guild(1440680053867286560).get_channel(1440680171890933863)
+                await handle_notification()
             except Exception as e:
-                print(f"コマンドの同期中にエラーが発生しました。\n{e}")
+                log.error(f"コマンドの同期中にエラーが発生しました。\n{e}")
             asyncio.create_task(console_input())
+            # await supabase.rpc("create_post", {"p_content": "NyaXBotが起動しました!", "p_reply_id": None, "p_repost_to": None, "p_attachments": None}).execute()
+            await log_channel.send("NyaXBotが起動しました!")
+
+        nyax_feed = supabase.channel("nyax-feed")
+
+        async def handle_notification(payload = None):
+            global currentUser
+            log = get_log("handle_notification")
+            try:
+                session = await supabase.auth.get_session()
+                response = (
+                    await supabase.table("user")
+                    .select("notice")
+                    .eq("id", currentUser["id"])
+                    .execute()
+                )
+                result = response.data[0]
+                # log.debug(result)
+                notices = result["notice"]
+                noti_count = 0
+                for n_obj in notices:
+                    notification = None
+                    if(type(n_obj) is dict):
+                        notification = n_obj
+                    else:
+                        notification = {"id": uuid.uuid4(), "message": n_obj, "open": "", "click": True}
+                    if(notification["click"] is not True):
+                        log.debug(notification)
+                        log.debug(notification["message"])
+                        # await log_channel.send(notification["message"])
+                        await handle_notification_message(notification)
+                        noti_count += 1
+                if(noti_count != 0):
+                    await supabase.rpc('mark_all_notifications_as_read', {"p_user_id":currentUser["id"]}).execute()
+                if(currentUser["notice"]):
+                    for i in currentUser["notice"]:
+                        i["click"] = True
+                currentUser["notice_count"] = 0
+            except Exception as e:
+                log.error(f"通知の取得にエラーが発生しました。\n{e}")
+
+        nyax_feed.on_postgres_changes(
+            event="UPDATE",
+            schema="public",
+            table="user",
+            filter=f"id=eq.{currentUser['id']}",
+            callback=lambda payload: asyncio.create_task(handle_notification(payload))
+        )
+        await nyax_feed.subscribe()
+
         await bot.start(DISCORD_TOKEN)
     except Exception as e:
-        print(f"BOTの起動中にエラーが発生しました\n{e}")
+        log.error(f"BOTの起動中にエラーが発生しました\n{e}")
 
 if __name__ == "__main__":
-    discord.utils.setup_logging()
+    discord.utils.setup_logging(handler=stream_handler)
     asyncio.run(main())
