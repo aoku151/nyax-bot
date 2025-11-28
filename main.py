@@ -11,10 +11,12 @@ import aiohttp
 import aioconsole
 import json
 import discord
+from datetime import datetime, timezone
 from discord.ext import commands
 from discord import app_commands
 from func.session import Sessions
 from func.log import get_log, stream_handler
+from func.data import dmInviteMessage
 load_dotenv()
 
 DISCORD_TOKEN: str = os.getenv("DISCORD_TOKEN")
@@ -34,14 +36,38 @@ async def console_input():
             await bot.close()
             break
 
+supabase: AsyncClient = None
 currentUser = None
 session = None
 
 log_channel: discord.TextChannel = None
 
+async def handle_notification_message(notification):
+    log = get_log("handle_notification_message")
+    try:
+        if("あなたをDMに招待しました" in notification["message"]):
+            dmid = notification["open"][4:]
+            message = {
+                "id": str(uuid.uuid4()),
+                "time": datetime.now(timezone.utc).isoformat(timespec="microseconds"),
+                "userid": currentUser["id"],
+                "content": dmInviteMessage,
+                "attachments": [],
+                "read": [currentUser["id"]]
+            }
+            response = (
+                await supabase.rpc("append_to_dm_post", {
+                    "dm_id_in": dmid,
+                    "new_message_in": message
+                })
+                .execute()
+            )
+    except Exception as e:
+        log.error(f"通知のメッセージ処理中にエラーが発生しました\n{e}")
+
 async def main():
     log = main_log
-    global currentUser, session
+    global currentUser, supabase, session
     try:
         supabase, session = await sessions.get_supabase()
         # session = await supabase.auth.get_session()
@@ -87,8 +113,10 @@ async def main():
                     else:
                         notification = {"id": uuid.uuid4(), "message": n_obj, "open": "", "click": True}
                     if(notification["click"] is not True):
+                        log.debug(notification)
                         log.debug(notification["message"])
                         # await log_channel.send(notification["message"])
+                        await handle_notification_message(notification)
                         noti_count += 1
                 if(noti_count != 0):
                     await supabase.rpc('mark_all_notifications_as_read', {"p_user_id":currentUser["id"]}).execute()
