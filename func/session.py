@@ -8,6 +8,7 @@ import aiohttp
 import json
 from func.log import get_log
 from func.data import header
+load_dotenv()
 
 sp_url: str = getenv("SUPABASE_URL")
 sp_key: str = getenv("SUPABASE_ANON_KEY")
@@ -22,7 +23,6 @@ class Sessions:
         """
         self.path:str = file_path
         self.url:str = "https://mnvdpvsivqqbzbtjtpws.supabase.co/functions/v1/scratch-auth-handler"
-        self.supabase:AsyncClient = None
 
     def getSession(self, key:str):
         with open(self.path, "r") as f:
@@ -65,7 +65,6 @@ class Sessions:
                 log.info("セッションは有効です。認証に成功しました!")
                 await sc.close()
                 await supabase.realtime.connect()
-                self.supabase = supabase
                 return supabase, sp_res.session
             except Exception as e:
                 log.error(f"Nyaxのログイン中にエラーが発生しました。\n{e}")
@@ -86,12 +85,11 @@ class Sessions:
                 return session
             except Exception as e:
                 log.error(f"Scratchのログインに失敗しました\n{e}")
-    async def get_currentUser(self, supabase:AsyncClient = None):
+    async def get_currentUser(self, client, session):
         log = get_log("get_currentUser")
         try:
-            sp = supabase or self.supabase
             currentUser = (
-                await sp.table("user")
+                await client.table("user")
                 .select("*")
                 .eq("uuid", session.user.id)
                 .execute()
