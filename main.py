@@ -1,40 +1,52 @@
+# 設定系
 from os import getenv
-from typing import Tuple
-import uuid
-import logging
 from dotenv import load_dotenv
-from supabase import acreate_client, AsyncClient
-import supabase as Supabase
-import scapi
-import asyncio
-import aiohttp
-import aioconsole
-import aioboto3
-import json
+load_dotenv()
+from func.data import dmInviteMessage, helpMessage, header
+# Discord系
 import discord
-import re
-import io
-from datetime import datetime, timezone
 from discord.ext import commands, tasks
 from discord import app_commands
-from func.session import Sessions
+# 非同期系
+import asyncio
+# Scratch系
+import scapi
+# HTTPリクエスト系
+import aiohttp
+import json
+# コンソール系
+import logging
 from func.log import get_log, stream_handler
-from func.data import dmInviteMessage, helpMessage, header
+import aioconsole
+# Supabase系
+from supabase import acreate_client, AsyncClient
+from func.session import Sessions
+import supabase as Supabase
+# ファイル操作系
+import aioboto3
 from func.r2 import upload_fileobj
 from func.miq import create_quote_image
-load_dotenv()
+import io
+# 汎用系
+from typing import Tuple
+import uuid
+import re
+from datetime import datetime, timezone
 
+# トークンとか
 DISCORD_TOKEN: str = getenv("DISCORD_TOKEN")
 SUPABASE_URL: str = getenv("SUPABASE_URL")
 SUPABASE_ANON_KEY: str = getenv("SUPABASE_ANON_KEY")
 sessions_path = "sessions.json"
 sessions = Sessions(sessions_path)
 
+# Discord Botの設定
 intents = discord.Intents.all()
 bot = commands.Bot(command_prefix="!", intents=intents)
 
 main_log = get_log("Main")
 
+# Raspberry Pi Connectで^Cが使えないため
 async def console_input():
     while True:
         line = await aioconsole.ainput("type:")
@@ -42,20 +54,27 @@ async def console_input():
             await bot_stop()
             break
 
+# NyaXBotを停止する関数(扱い注意)
 async def bot_stop():
     main_log.info("Stop.")
     await status_update("停止中")
     await bot.close()
 
+# グローバル変数
 supabase: AsyncClient = None
 currentUser = None
 session = None
-
 log_channel: discord.TextChannel = None
-
 console_task = None
 
 async def sendNotification(recipientId:str, message:str, openHash:str=""):
+    """
+    ユーザーに通知を送信します。
+    Args:
+        recipientId (str): 送信先のユーザーID
+        message (str): 送信するメッセージ
+        openHash (:obj:`str`, optional): 通知を押したときにジャンプするHash
+    """
     log = get_log("sendNotification")
     try:
         if(not currentUser or not recipientId or not message or recipientId == currentUser["id"]):
@@ -72,6 +91,12 @@ async def sendNotification(recipientId:str, message:str, openHash:str=""):
         log.error(f"通知の送信中にエラーが発生しました。\n{e}")
 
 async def send_dm_message(dmid:str,message:str):
+    """
+    DMにメッセージを送信します。
+    Args:
+        dmid (str): 送信するDMのID
+        message (str): メッセージ
+    """
     log = get_log("send_dm_message")
     try:
         messagedict = {
@@ -86,7 +111,17 @@ async def send_dm_message(dmid:str,message:str):
     except Exception as e:
         log.error(f"DMのメッセージ送信中にエラーが発生しました。\n{e}")
 
-async def send_post(content:str, reply_id:str = None, repost_id:str = None, attachments:list = None):
+async def send_post(content:str = None, reply_id:str = None, repost_id:str = None, attachments:list = None):
+    """
+    ポストをします。
+    Args:
+        content (:obj:`str`, optional): ポストの内容。リポストの場合には指定しない。
+        reply_id (:obj:`str`, optional): 返信するポストのID。返信の場合にのみ指定し、リポストと混合させない。
+        repost_id (:obj:`str`, optional): リポストするポストのID。この場合には他の引数はつけない。
+        attachments (:obj:`list`, optional): 添付ファイルのリスト。送信前に別処理が必要。
+    Todo:
+        * リポスト時の通知処理の移植
+    """
     log = get_log("send_post")
     try:
         #ポストの送信
@@ -125,7 +160,14 @@ async def send_post(content:str, reply_id:str = None, repost_id:str = None, atta
     except Exception as e:
         log.error(f"ポスト中にエラーが発生しました。\n{e}")
 
-async def get_hydrated_posts(ids):
+async def get_hydrated_posts(ids:list) -> list[dict]:
+    """
+    ポストの詳細をまとめて取得します。
+    Args:
+        ids (list): 取得するポストIDのリスト
+    Returns:
+        list: 中身はポストの詳細
+    """
     log = get_log("get_hydrated_posts")
     try:
         async with aiohttp.ClientSession() as a_session:
@@ -149,6 +191,10 @@ async def get_hydrated_posts(ids):
 
 @tasks.loop(seconds=30)
 async def subscribe_dm():
+    """
+    DMのメッセージを確認します。
+    通常はDiscord.pyのdiscord.ext.tasksで実行します。
+    """
     log = get_log("subscribe_dm")
     try:
         response = (
@@ -189,6 +235,11 @@ async def subscribe_dm():
         log.error(f"DMの処理中にエラーが発生しました。\n{e}")
 
 async def handle_notification_message(notification):
+    """
+    通知を処理します。
+    Args:
+        notification (dict): 通知の内容
+    """
     log = get_log("handle_notification_message")
     try:
         if("あなたをDMに招待しました" in notification["message"]):
@@ -222,15 +273,23 @@ async def handle_notification_message(notification):
                         "id":fileid,
                         "name": f"{rep['id']}.jpg"
                     }]
-                    await send_post("Make it a Quote画像を生成しました！", reply_id=postid, attachments=amdata)
+                    await send_post(content = "Make it a Quote画像を生成しました！", reply_id = postid, attachments = amdata)
                 else:
-                    await send_post("返信を使用してください。", reply_id = postid)
+                    await send_post(content = "返信を使用してください。", reply_id = postid)
             if("おはよう" in message["content"]):
-                await send_post(f"おはようございます! {re.search(r'@[0-9]{4}', notification['message'])[0]} さん!", postid)
+                await send_post(content=f"おはようございます! {re.search(r'@[0-9]{4}', notification['message'])[0]} さん!", reply_id = postid)
     except Exception as e:
         log.error(f"通知のメッセージ処理中にエラーが発生しました\n{e}")
 
-async def create_miq(mes, color) -> str:
+async def create_miq(mes:dict, color:bool) -> str:
+    """
+    Make it a Quoteを作成し、SupabaseのStorageにUploadします
+    Args:
+        mes (dict): ポストの詳細
+        color (bool): モノクロかカラーか(True: カラー, False: モノクロ)
+    Returns:
+        str: SupabaseのFileID
+    """
     log = get_log("create_miq")
     try:
         avatar_url_res = (
@@ -268,7 +327,13 @@ async def create_miq(mes, color) -> str:
     except Exception as e:
         log.error(f"Miqの作成時にエラーが発生しました。\n{e}")
 
-async def handle_dm_message(msg,dmid):
+async def handle_dm_message(msg:dict, dmid:str):
+    """
+    DMのメッセージを処理します。
+    Args:
+        msg (dict): DMのメッセージの詳細
+        dmid (str): 応答があったDMのID
+    """
     match msg["content"]:
         case "/hello":
             await send_dm_message(dmid, "こんにちは!NyaXBotです!")
@@ -276,6 +341,11 @@ async def handle_dm_message(msg,dmid):
             await send_dm_message(dmid, helpMessage)
 
 async def status_update(status):
+    """
+    ステータスを変更します。
+    Args:
+        status (str): ステータス名
+    """
     log = get_log("status_update")
     try:
         message = f"""NyaXBot
@@ -309,9 +379,13 @@ https://github.com/aoku151/nyax-bot/
         log.error(f"プロフィールの更新中にエラーが発生しました。\n{e}")
 
 async def main():
+    """
+    Botメイン機構
+    """
     log = main_log
     global currentUser, supabase, session
     try:
+        # Supabaseのログイン
         supabase, session = await sessions.get_supabase()
         # session = await supabase.auth.get_session()
         currentUser = await sessions.get_currentUser(supabase, session)
