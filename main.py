@@ -1,4 +1,4 @@
-import os
+from os import getenv
 from typing import Tuple
 import uuid
 import logging
@@ -9,17 +9,24 @@ import scapi
 import asyncio
 import aiohttp
 import aioconsole
+import aioboto3
 import json
 import discord
+import re
+import io
 from datetime import datetime, timezone
 from discord.ext import commands, tasks
 from discord import app_commands
 from func.session import Sessions
 from func.log import get_log, stream_handler
-from func.data import dmInviteMessage, helpMessage
+from func.data import dmInviteMessage, helpMessage, header
+from func.r2 import upload_fileobj
+from func.miq import create_quote_image
 load_dotenv()
 
-DISCORD_TOKEN: str = os.getenv("DISCORD_TOKEN")
+DISCORD_TOKEN: str = getenv("DISCORD_TOKEN")
+SUPABASE_URL: str = getenv("SUPABASE_URL")
+SUPABASE_ANON_KEY: str = getenv("SUPABASE_ANON_KEY")
 sessions_path = "sessions.json"
 sessions = Sessions(sessions_path)
 
@@ -32,10 +39,13 @@ async def console_input():
     while True:
         line = await aioconsole.ainput("type:")
         if line.strip() == "finish":
-            main_log.info("Stop.")
-            await status_update("停止中")
-            await bot.close()
+            await bot_stop()
             break
+
+async def bot_stop():
+    main_log.info("Stop.")
+    await status_update("停止中")
+    await bot.close()
 
 supabase: AsyncClient = None
 currentUser = None
@@ -44,6 +54,22 @@ session = None
 log_channel: discord.TextChannel = None
 
 console_task = None
+
+async def sendNotification(recipientId:str, message:str, openHash:str=""):
+    log = get_log("sendNotification")
+    try:
+        if(not currentUser or not recipientId or not message or recipientId == currentUser["id"]):
+            return
+        response = (
+            await supabase.rpc("send_notification_with_timestamp", {
+                "recipient_id": recipientId,
+                "message_text": message,
+                "open_hash": openHash
+            })
+            .execute()
+        )
+    except Exception as e:
+        log.error(f"通知の送信中にエラーが発生しました。\n{e}")
 
 async def send_dm_message(dmid:str,message:str):
     log = get_log("send_dm_message")
@@ -60,7 +86,68 @@ async def send_dm_message(dmid:str,message:str):
     except Exception as e:
         log.error(f"DMのメッセージ送信中にエラーが発生しました。\n{e}")
 
-@tasks.loop(seconds=15)
+async def send_post(content:str, reply_id:str = None, repost_id:str = None, attachments:list = None):
+    log = get_log("send_post")
+    try:
+        #ポストの送信
+        newPost = (
+            await supabase.rpc("create_post", {
+                "p_content": content,
+                "p_reply_id": reply_id,
+                "p_repost_to": repost_id,
+                "p_attachments": attachments
+            })
+            .single()
+            .execute()
+        ).data
+        #返信時の通知送信
+        replied_user_id = None
+        if(reply_id):
+            parentPost = (
+                await supabase.table("post")
+                .select("userid")
+                .eq("id", reply_id)
+                .single()
+                .execute()
+            ).data
+            log.debug(parentPost)
+            if(parentPost and parentPost["userid"] != currentUser["id"]):
+                replied_user_id = parentPost["userid"]
+                await sendNotification(replied_user_id, f"@{currentUser['id']}さんがあなたのポストに返信しました。", f"#post/{newPost['id']}")
+        #メンションの通知送信
+        mentioned_ids = set()
+        for match in re.finditer(r"@(\d+)", content):
+            mentioned_id = int(match.group(1))
+            if(mentioned_id != currentUser["id"] and mentioned_id != replied_user_id):
+                mentioned_ids.add(mentioned_id)
+        for id in mentioned_ids:
+            await sendNotification(id, f"@{currentUser['id']}さんがあなたをメンションしました。", f"#post/{newPost['id']}")
+    except Exception as e:
+        log.error(f"ポスト中にエラーが発生しました。\n{e}")
+
+async def get_hydrated_posts(ids):
+    log = get_log("get_hydrated_posts")
+    try:
+        async with aiohttp.ClientSession() as a_session:
+            async with a_session.post(
+                f"{SUPABASE_URL}/rest/v1/rpc/get_hydrated_posts",
+                headers={
+                    "apikey": SUPABASE_ANON_KEY,
+                    "Authorization": f"Bearer {SUPABASE_ANON_KEY}",
+                    "Content-Type": "application/json",
+                    "Content-Profile": "public"
+                },
+                data=json.dumps(
+                    {"p_post_ids": ids},
+                    separators=(',', ":")
+                )
+            ) as post:
+                data = await post.json()
+        return data
+    except Exception as e:
+        log.error(f"ポストの情報取得中にエラーが発生しました。\n{e}")
+
+@tasks.loop(seconds=30)
 async def subscribe_dm():
     log = get_log("subscribe_dm")
     try:
@@ -109,25 +196,77 @@ async def handle_notification_message(notification):
             await send_dm_message(dmid, dmInviteMessage)
         elif("あなたをメンションしました" in notification["message"]):
             postid = notification["open"][6:]
+            log.debug(postid)
+            message = (
+                await supabase.table("post")
+                .select("content, repost_to")
+                .eq("id", postid)
+                .execute()
+            ).data[0]
             if("@4332さん" in notification["message"]):
-            #     response = (
-            #         await supabase.rpc("handle_like", {
-            #             "p_post_id": postid
-            #         })
-            #         .execute()
-            #     )
-                response = (
-                    await supabase.table("post")
-                    .select("content, repost_to")
-                    .eq("id", postid)
-                    .execute()
-                )
-                if("/finish" in response.data[0]["content"]):
+                if("/finish" in message["content"]):
                     await supabase.rpc("handle_like", {"p_post_id": postid}).execute()
-                    #console_task.cancel()
-                    #await bot.close()
+                    await bot_stop()
+            if("/miq" in message["content"]):
+                log.debug("MIQ")
+                mainPost = (await get_hydrated_posts([postid]))[0]
+                log.debug(mainPost)
+                rep = mainPost["reply_to_post"]
+                if(rep):
+                    color = "!c" in message["content"]
+                    fileid = await create_miq(rep, color)
+                    if(not fileid):
+                        return
+                    amdata = [{
+                        "type":"image",
+                        "id":fileid,
+                        "name": f"{rep['id']}.jpg"
+                    }]
+                    await send_post("Make it a Quote画像を生成しました！", reply_id=postid, attachments=amdata)
+                else:
+                    await send_post("返信を使用してください。", reply_id = postid)
+            if("おはよう" in message["content"]):
+                await send_post(f"おはようございます! {re.search(r'@[0-9]{4}', notification['message'])[0]} さん!", postid)
     except Exception as e:
         log.error(f"通知のメッセージ処理中にエラーが発生しました\n{e}")
+
+async def create_miq(mes, color) -> str:
+    log = get_log("create_miq")
+    try:
+        avatar_url_res = (
+            await supabase.storage
+            .from_("nyax")
+            .get_public_url(mes["author"]["icon_data"])
+        )
+        log.debug(avatar_url_res)
+        miq_header = {
+            "Authorization": f"Bearer {SUPABASE_ANON_KEY}"
+        }
+        async with aiohttp.ClientSession() as a_session:
+            async with a_session.get(avatar_url_res) as resp:
+                if(resp.status == 200):
+                    icon_data = await resp.read()
+                    log.debug(icon_data)
+                    icon = io.BytesIO(icon_data)
+                else:
+                    raise Exception(await resp.json())
+        log.debug(icon)
+        img = await asyncio.to_thread(create_quote_image, icon, mes["content"], f"{mes['author']['name']}@{mes['author']['id']}", color)
+        if(not img):
+            return
+        async with aiohttp.ClientSession() as a_session:
+            data = aiohttp.FormData()
+            data.add_field("file", img, filename=f"{mes['id']}.jpg", content_type="image/jpeg")
+
+            async with a_session.post(f"{SUPABASE_URL.replace('.supabase.co', '.functions.supabase.co')}/upload-file", headers=miq_header, data=data) as resp:
+                result = await resp.json()
+        res_data = result["data"] if "data" in result else result
+        if("error" in res_data):
+            raise Exception(f"ファイルアップロードエラー:{res_data['error']}")
+        fileid = res_data["fileId"]
+        return fileid
+    except Exception as e:
+        log.error(f"Miqの作成時にエラーが発生しました。\n{e}")
 
 async def handle_dm_message(msg,dmid):
     match msg["content"]:
@@ -171,7 +310,7 @@ https://github.com/aoku151/nyax-bot/
 
 async def main():
     log = main_log
-    global currentUser, supabase, session, console_task
+    global currentUser, supabase, session
     try:
         supabase, session = await sessions.get_supabase()
         # session = await supabase.auth.get_session()
@@ -180,7 +319,7 @@ async def main():
 
         @bot.event
         async def on_ready():
-            global log_channel, console_task
+            global log_channel, console_task, s3, s3_session
             console_task = asyncio.create_task(console_input())
             log.info(f"Discord:{bot.user}としてログインしました^o^")
             try:

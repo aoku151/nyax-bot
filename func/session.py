@@ -53,7 +53,7 @@ class Sessions:
                     async with session.post(self.url, json=first, headers=header) as res:
                         response = await res.json()
                 log.info(f"ログインコードを取得しました!{response['code']}")
-                await sc.user.post_comment(f"{resposen['code']}")
+                await sc.user.post_comment(f"{response['code']}")
                 second = {"type": "verifyComment", "username": sc_name, "code": response["code"]}
                 log.info("セッションを取得しています...")
                 async with aiohttp.ClientSession() as session:
@@ -61,7 +61,7 @@ class Sessions:
                         response = await res.json()
                 log.info("セッションを取得しました!")
                 sp_res = await supabase.auth.set_session(response["jwt"], response["jwt"])
-                self.setSession("sp_key", reponse["jwt"])
+                self.setSession("sp_key", response["jwt"])
                 log.info("セッションは有効です。認証に成功しました!")
                 await sc.close()
                 await supabase.realtime.connect()
