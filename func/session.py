@@ -16,25 +16,46 @@ sc_name: str = getenv("SCRATCH_USER")
 sc_pass: str = getenv("SCRATCH_PASSWORD")
 
 class Sessions:
+    """Supabaseのセッション管理
+    ScratchログインとSupabaseログインに関する管理クラス
+    """
     def __init__(self, file_path:str):
         """
-        path(str) : Session PATH
-        url(str) : Supabase URL
+        Args:
+            file_path (str): セッション管理JSONのPATH
+        Attributes:
+            path (str): Session PATH
+            url (str): Supabase URL
         """
         self.path:str = file_path
-        self.url:str = "https://mnvdpvsivqqbzbtjtpws.supabase.co/functions/v1/scratch-auth-handler"
+        self.url:str = f"{sp_url}/functions/v1/scratch-auth-handler"
 
     def getSession(self, key:str):
+        """
+        セッションを保存領域から取得します
+        Args:
+            key (str): キー
+        """
         with open(self.path, "r") as f:
             return json.load(f)[key]
     
     def setSession(self, key:str, value:str):
+        """
+        セッションを保存領域に保存します
+        Args:
+            key (str): キー
+            value (str): セッション
+        """
         with open(self.path, "r") as f:
             data = json.load(f)
         data[key] = value
         with open(self.path, "w") as f:
             json.dump(data, f, indent=4)
+    
     async def get_supabase(self):
+        """
+        Supabaseにログインします。
+        """
         log = get_log("get_supabase")
         try:
             supabase: AsyncClient = await acreate_client(sp_url, sp_key)
@@ -68,7 +89,14 @@ class Sessions:
                 return supabase, sp_res.session
             except Exception as e:
                 log.error(f"Nyaxのログイン中にエラーが発生しました。\n{e}")
-    async def get_scratch(self):
+    async def get_scratch(self) -> scapi.Session:
+        """
+        Scratchにログインします。
+        Returns:
+            scapi.Session: Scratchのセッション(ScapiのClass)
+        Note:
+            セッションはsc_keyとしてgetSession関数から取得できます。
+        """
         log = get_log("get_scratch")
         log.info("Scratchにログインしています...")
         try:
@@ -86,6 +114,12 @@ class Sessions:
             except Exception as e:
                 log.error(f"Scratchのログインに失敗しました\n{e}")
     async def get_currentUser(self, client, session):
+        """
+        今のユーザーのデータを取得します。
+        Args:
+            client (AsyncClient): Supabaseのクライアント
+            session (Session): Supabaseのセッション
+        """
         log = get_log("get_currentUser")
         try:
             currentUser = (
