@@ -111,7 +111,7 @@ async def send_dm_message(dmid:str,message:str):
     except Exception as e:
         log.error(f"DMのメッセージ送信中にエラーが発生しました。\n{e}")
 
-async def send_post(content:str = None, reply_id:str = None, repost_id:str = None, attachments:list = None):
+async def send_post(content:str = None, reply_id:str = None, repost_id:str = None, attachments:list = None, mask:bool = False):
     """
     ポストをします。
     Args:
@@ -126,11 +126,12 @@ async def send_post(content:str = None, reply_id:str = None, repost_id:str = Non
     try:
         #ポストの送信
         newPost = (
-            await supabase.rpc("create_post", {
+            await supabase.rpc("create_post_new", {
                 "p_content": content,
                 "p_reply_id": reply_id,
                 "p_repost_to": repost_id,
-                "p_attachments": attachments
+                "p_attachments": attachments,
+                "p_mask": mask
             })
             .single()
             .execute()
@@ -160,7 +161,7 @@ async def send_post(content:str = None, reply_id:str = None, repost_id:str = Non
     except Exception as e:
         log.error(f"ポスト中にエラーが発生しました。\n{e}")
 
-async def get_hydrated_posts(ids:list) -> list[dict]:
+async def get_hydrated_posts(ids:list, profile:bool = False) -> list[dict]:
     """
     ポストの詳細をまとめて取得します。
     Args:
@@ -180,11 +181,16 @@ async def get_hydrated_posts(ids:list) -> list[dict]:
                     "Content-Profile": "public"
                 },
                 data=json.dumps(
-                    {"p_post_ids": ids},
+                    {
+                        "p_post_ids": ids,
+                        "p_profile": profile
+                    },
                     separators=(',', ":")
                 )
             ) as post:
                 data = await post.json()
+        if("error" in data):
+            raise Exception(data["error"])
         return data
     except Exception as e:
         log.error(f"ポストの情報取得中にエラーが発生しました。\n{e}")
