@@ -1,6 +1,7 @@
 from os import getenv
 from dotenv import load_dotenv
 from supabase import acreate_client, AsyncClient
+from supabase_auth.errors import AuthApiError
 import supabase as Supabase
 import scapi
 import asyncio
@@ -84,9 +85,11 @@ class Sessions:
                 sp_res = await supabase.auth.set_session(response["jwt"], response["jwt"])
                 self.setSession("sp_key", response["jwt"])
                 log.info("セッションは有効です。認証に成功しました!")
-                await sc.close()
+                await sc.client_close()
                 await supabase.realtime.connect()
                 return supabase, sp_res.session
+            except AuthApiError as e:
+                log.warning("Refresh TOKENが存在しないからSupabaseがエラー吐いたそうです。\nそんなのないけど")
             except Exception as e:
                 log.error(f"Nyaxのログイン中にエラーが発生しました。\n{e}")
     async def get_scratch(self) -> scapi.Session:
