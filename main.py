@@ -203,29 +203,19 @@ async def subscribe_dm():
     """
     log = get_log("subscribe_dm")
     try:
-        response = (
-            await supabase.table("dm")
-            .select("id, title, member, time")
-            .contains("member", [str(currentUser["id"])])
-            .order("time", desc=True)
-            .execute()
-        )
-        dmids = []
-        for i in response.data:
-            dmids.append(i["id"])
-        response2 = (
-            await supabase.table("dm")
-            .select("id, title, post, member, host_id")
-            .in_("id", dmids)
-            .execute()
-        )
-        response3 = await supabase.rpc("get_all_unread_dm_counts", {"p_user_id": currentUser["id"]}).execute()
-        #log.debug(response3)
-        if(response3.data):
+        response = await supabase.rpc("get_all_unread_dm_counts", {"p_user_id": currentUser["id"]}).execute()
+        if(response.data):
             unread_data = {}
             for i in response3.data:
                 unread_data[i["dm_id"]] = i["unread_count"]
-            log.debug(unread_data)
+            dmfilterdIds = list(unread_data.keys())
+            response2 = (
+                await supabase.table("dm")
+                .select("id, title, post, member, host_id")
+                .in_("id", dmfilterdIds)
+                .execute()
+            )
+
             for i in response2.data:
                 #log.debug(i)
                 if(i["id"] not in unread_data):
