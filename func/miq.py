@@ -1,7 +1,7 @@
 from PIL import Image, ImageDraw, ImageFont
 import io
 from io import BytesIO
-import textwarp
+import textwrap
 
 def create_quote_image(icon: BytesIO, content:str, author:str, color:bool = None) -> BytesIO:
     """
