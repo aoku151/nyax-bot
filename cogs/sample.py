@@ -7,6 +7,8 @@ class NameCog(commands.Cog):
     def __init__(self, bot:commands.Bot):
         self.bot = bot
         self.log = get_log(self.__class__.__name__)
+		self.supabase = bot.supabase
+		self.session = bot.supabase_session
     
     @commands.Cog.listener()
     async def on_ready(self):
