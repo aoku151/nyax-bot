@@ -2,6 +2,39 @@ from PIL import Image, ImageDraw, ImageFont
 import io
 from io import BytesIO
 import textwrap
+from func.log import get_log
+
+def wrap_text_by_pixel(draw: ImageDraw.ImageDraw, text: str, font: ImageFont.ImageFont, max_pixel_width: int) -> str:
+    """
+    テキストをピクセル幅に基づいて改行する関数
+    """
+    words = text.split()
+    lines = []
+    line = ""
+
+    for word in words:
+        test_line = line + (" " if line else "") + word
+        if draw.textlength(test_line, font=font) <= max_pixel_width:
+            line = test_line
+        else:
+            lines.append(line)
+            line = word
+    if line:
+        lines.append(line)
+
+    return "\n".join(lines)
+
+def draw_centered_multiline(draw, text_lines, font, area_left, area_right, start_y, fill, line_spacing=5):
+    """
+    各行を中央揃えで描画する関数
+    """
+    area_width = area_right - area_left
+    y = start_y
+    for line in text_lines:
+        line_width = draw.textlength(line, font=font)
+        x = area_left + (area_width - line_width) // 2
+        draw.text((x, y), line, font=font, fill=fill)
+        y += font.size + line_spacing
 
 def create_quote_image(icon: BytesIO, content:str, author:str, color:bool = None) -> BytesIO:
     """
@@ -16,6 +49,7 @@ def create_quote_image(icon: BytesIO, content:str, author:str, color:bool = None
         BytesIO: 画像のデータ
     """
     width, height = 800, 400
+    log = get_log("miq.create_quote_image")
 
     img = Image.new("RGB", (width, height), color=(0, 0, 0))
     draw = ImageDraw.Draw(img)
@@ -48,31 +82,45 @@ def create_quote_image(icon: BytesIO, content:str, author:str, color:bool = None
     black_area = Image.new("RGB", (grad_width, height), color=(0, 0, 0))
     img.paste(black_area, (height, 0), mask=gradient)
 
-    font_quote = ImageFont.truetype("font/miq_n.ttf", 30)
+    font_quote = ImageFont.truetype("font/miq_n.ttf", 28)
     font_author = ImageFont.truetype("font/miq_n.ttf", 20)
-    font_signature = ImageFont.truetype("font/miq_s.ttf", 20)
+    font_signature = ImageFont.truetype("font/miq_s.ttf", 15)
 
-    max_width_quote = 20
-    wrapped_quote = textwarp.fill(content, width=max_width_quote)
-    bbox_quote = draw.multiline_textbbox((0, 0), content, font=font_quote)
-    text_w_q = bbox_quote[2] - bbox_quote[0]
-    text_h_q = bbox_quote[3] - bbox_quote[1]
-    pos_quote = (
-        height + (width - height -text_w_q) // 2,
-        (height - text_h_q) //2 - 20
-    )
-    draw.multiline_text(pos_quote, wrapped_quote, font=font_quote, fill=(255, 255, 255))
+    max_text_width = width - height - 40
+    wrapped_quote = wrap_text_by_pixel(draw, content, font_quote, max_text_width)
+    quote_lines = wrapped_quote.split("\n")
+    log.debug(wrapped_quote)
 
-    max_width_author = 20
-    wrapped_author = textwarp.fill(author, width=max_width_author)
-    bbox_author = draw.textbbox((0, 0), wrapped_author, font=font_author)
-    text_w_a = bbox_author[2] - bbox_author[0]
-    text_h_a = bbox_author[3] - bbox_author[1]
-    pos_author = (
-        height + (width - height - text_w_a)//2,
-        pos_quote[1] + text_h_q + 10
+    total_text_height = len(quote_lines) * (font_quote.size + 5)
+    start_y = (height - total_text_height) // 2 - 20
+
+    draw_centered_multiline(
+        draw,
+        quote_lines,
+        font_quote,
+        area_left=height,
+        area_right=width,
+        start_y=start_y,
+        fill=(255, 255, 255),
+        line_spacing=5
     )
-    draw.text(pos_author, wrapped_author, font=font_author, fill=(200, 200, 200))
+
+    wrapped_author = wrap_text_by_pixel(draw, author, font_author, max_text_width)
+    author_lines = wrapped_author.split("\n")
+
+    total_author_height = len(author_lines) * (font_author.size + 5)
+    start_y_author = start_y + total_text_height + 10
+
+    draw_centered_multiline(
+        draw,
+        author_lines,
+        font_author,
+        area_left=height,
+        area_right=width,
+        start_y=start_y_author,
+        fill=(200, 200, 200),
+        line_spacing=5
+    )
 
     signature = "NyaXBot@1340"
     bbox_sig = draw.textbbox((0, 0), signature, font=font_signature)
