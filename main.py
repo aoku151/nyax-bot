@@ -37,6 +37,7 @@ from datetime import datetime, timezone
 DISCORD_TOKEN: str = getenv("DISCORD_TOKEN")
 SUPABASE_URL: str = getenv("SUPABASE_URL")
 SUPABASE_ANON_KEY: str = getenv("SUPABASE_ANON_KEY")
+defaultDmId: str = getenv("DEFAULT_DM_ID")
 sessions_path = "sessions.json"
 sessions = Sessions(sessions_path)
 
@@ -107,9 +108,28 @@ async def send_dm_message(dmid:str,message:str):
             "attachments": [],
             "read": [currentUser["id"]]
         }
-        await supabase.rpc("append_to_dm_post", {"dm_id_in": dmid, "new_message_in": messagedict}).execute()
+        await supabase.rpc("append_to_dm_post", {
+            "dm_id_in": dmid,
+            "new_message_in": messagedict
+        }).execute()
     except Exception as e:
         log.error(f"DMのメッセージ送信中にエラーが発生しました。\n{e}")
+
+async def send_system_dm_message(dmid:str, message:str):
+    log = get_log("send_dm_message")
+    try:
+        messagedict = {
+            "id": str(uuid.uuid4()),
+            "time": datetime.now(timezone.utc).isoformat(timespec="microseconds"),
+            "type": "system",
+            "content": message
+        }
+        await supabase.rpc("append_to_dm_post", {
+            "dm_id_in": dmid,
+            "new_message_in": messagedict
+        }).execute()
+    except Exception as e:
+        log.error(f"DMのシステムメッセージ送信中にエラーが発生しました。")
 
 async def send_post(content:str = None, reply_id:str = None, repost_id:str = None, attachments:list = None, mask:bool = False):
     """
@@ -195,6 +215,18 @@ async def get_hydrated_posts(ids:list, profile:bool = False) -> list[dict]:
     except Exception as e:
         log.error(f"ポストの情報取得中にエラーが発生しました。\n{e}")
 
+async def like(postId: str):
+    """
+    ポストにいいねします。
+    Args:
+        postId (str): PostID
+    """
+    log = get_log("like")
+    try:
+        await supabase.rpc("handle_like", {"p_post_id": postId}).execute()
+    except Exception as e:
+        log.error(f"いいね中にエラーが発生しました。\n{e}")
+
 @tasks.loop(seconds=30)
 async def subscribe_dm():
     """
@@ -206,7 +238,7 @@ async def subscribe_dm():
         response = await supabase.rpc("get_all_unread_dm_counts", {"p_user_id": currentUser["id"]}).execute()
         if(response.data):
             unread_data = {}
-            for i in response3.data:
+            for i in response.data:
                 unread_data[i["dm_id"]] = i["unread_count"]
             dmfilterdIds = list(unread_data.keys())
             response2 = (
@@ -230,14 +262,18 @@ async def subscribe_dm():
     except Exception as e:
         log.error(f"DMの処理中にエラーが発生しました。\n{e}")
 
+notifications_id = []
 async def handle_notification_message(notification):
     """
     通知を処理します。
     Args:
         notification (dict): 通知の内容
     """
+    global notifications_id
     log = get_log("handle_notification_message")
     try:
+        if(notification["id"] in notifications_id):
+            return
         if("あなたをDMに招待しました" in notification["message"]):
             dmid = notification["open"][4:]
             await send_dm_message(dmid, dmInviteMessage)
@@ -252,7 +288,8 @@ async def handle_notification_message(notification):
             ).data[0]
             if("@4332さん" in notification["message"]):
                 if("/finish" in message["content"]):
-                    await supabase.rpc("handle_like", {"p_post_id": postid}).execute()
+                    await like(postid)
+                    await supabase.rpc('mark_all_notifications_as_read', {"p_user_id":currentUser["id"]}).execute()
                     await bot_stop()
             if("/miq" in message["content"]):
                 log.debug("MIQ")
@@ -274,8 +311,37 @@ async def handle_notification_message(notification):
                     await send_post(content = "返信を使用してください。", reply_id = postid)
             if("おはよう" in message["content"]):
                 await send_post(content=f"おはようございます! {re.search(r'@[0-9]{4}', notification['message'])[0]} さん!", reply_id = postid)
+            if("/invite_dm" in message["content"]):
+                userid = re.search(r"[0-9]+", re.search(r"@[0-9]+さん", notification["message"])[0])[0]
+                log.debug(userid)
+                dm = (
+                    await supabase.table('dm')
+                    .select("member")
+                    .eq("id", defaultDmId)
+                    .execute()
+                ).data[0]
+                if(userid in dm["member"]):
+                    return
+                dm_update_res = (
+                    await supabase.table("dm")
+                    .update({"member": (dm["member"] + [userid])})
+                    .eq("id", defaultDmId)
+                    .execute()
+                ).data[0]
+                if("error" in dm_update_res):
+                    raise Exception(dm_update_res["error"])
+                await like(postid)
+                await send_system_dm_message(defaultDmId, f"@{userid}さんをNyaXBotDMに招待しました。")
+                # await mes_channel.send(embed=discord.Embed(
+                #     title="SystemMessage",
+                #     description=f"NyaXにてID:{userid}がDMに入室しました。", #あとで名前はどうにかする
+                #     color=0x00ff00
+                # ))
+                await sendNotification(userid, f"@{currentUser['id']}さんがあなたをDMに招待しました。", f"#dm/{defaultDmId}")
     except Exception as e:
         log.error(f"通知のメッセージ処理中にエラーが発生しました\n{e}")
+    finally:
+        notifications_id.append(notification["id"])
 
 async def create_miq(mes:dict, color:bool) -> str:
     """
@@ -288,6 +354,7 @@ async def create_miq(mes:dict, color:bool) -> str:
     """
     log = get_log("create_miq")
     try:
+        log.debug(mes["author"]["icon_data"])
         avatar_url_res = (
             await supabase.storage
             .from_("nyax")
@@ -402,6 +469,7 @@ async def main():
                 await handle_notification()
                 subscribe_dm.start()
                 await status_update("起動中")
+                await nyax_feed.subscribe()
             except Exception as e:
                 log.error(f"初期動作の実行中にエラーが発生しました。\n{e}")
             # await supabase.rpc("create_post", {"p_content": "NyaXBotが起動しました!", "p_reply_id": None, "p_repost_to": None, "p_attachments": None}).execute()
@@ -452,7 +520,6 @@ async def main():
             filter=f"id=eq.{currentUser['id']}",
             callback=lambda payload: asyncio.create_task(handle_notification(payload))
         )
-        await nyax_feed.subscribe()
 
         await bot.start(DISCORD_TOKEN)
     except Exception as e:
