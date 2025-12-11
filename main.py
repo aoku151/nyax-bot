@@ -7,6 +7,7 @@ from func.data import dmInviteMessage, helpMessage, header
 import discord
 from discord.ext import commands, tasks
 from discord import app_commands
+from func.discord import MyBot
 # 非同期系
 import asyncio
 # Scratch系
@@ -42,7 +43,7 @@ sessions = Sessions(sessions_path)
 
 # Discord Botの設定
 intents = discord.Intents.all()
-bot = commands.Bot(command_prefix="!", intents=intents)
+bot = MyBot(command_prefix="!", intents=intents)
 
 main_log = get_log("Main")
 
@@ -386,6 +387,8 @@ async def main():
         # session = await supabase.auth.get_session()
         currentUser = await sessions.get_currentUser(supabase, session)
         # log.debug(currentUser)
+        bot.supabase = supabase
+        bot.supabase_session = session
 
         @bot.event
         async def on_ready():
