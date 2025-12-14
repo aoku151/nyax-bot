@@ -3,31 +3,106 @@ import io
 from io import BytesIO
 import textwrap
 from func.log import get_log
+import cairosvg
+import re
+import os
 
-def wrap_text_by_pixel(draw: ImageDraw.ImageDraw, text: str, font: ImageFont.ImageFont, max_pixel_width: int) -> str:
+EMOJI_PATTERN = re.compile(r'_([a-zA-Z0-9\-]+)_')
+emoji_dire = "nyax/emoji"
+
+def adjust_font_size(draw, text:str, font_path: str, max_pixel_width: int, max_height: int, initial_size: int, min_size: int = 15):
+    size = initial_size
+    while size >= min_size:
+        font = ImageFont.truetype(font_path, size)
+        lines = wrap_text_by_pixel_with_emojis(draw, text, font, max_pixel_width)
+        total_height = len(lines) * (font.size + 5)
+        if total_height <= max_height:
+            return lines, font
+        size -= 2
+    font = ImageFont.truetype(font_path, min_size)
+    line = wrap_text_by_pixel_with_emojis(draw, text, font, max_pixel_width)
+    return lines, font
+
+def wrap_text_by_pixel_with_emojis(draw: ImageDraw.ImageDraw, text: str, font: ImageFont.ImageFont, max_pixel_width: int) -> list[str]:
     """
     テキストをピクセル幅に基づいて改行する関数
     """
-    words = text.split()
+    tokens = EMOJI_PATTERN.split(text)
     lines = []
     line = ""
+    line_width = 0
+    log = get_log("miq.wrap_text_by_pixel")
 
-    for word in words:
-        test_line = line + (" " if line else "") + word
-        if draw.textlength(test_line, font=font) <= max_pixel_width:
-            line = test_line
+    i = 0
+    while i < len(tokens):
+        if i % 2 == 1:
+            token_width = font.size
+            if line_width + token_width > max_pixel_width and line:
+                lines.append(line)
+                line = ""
+                line_width = 0
+            line += f"_{tokens[i]}_"
+            line_width += token_width
         else:
-            lines.append(line)
-            line = word
+            for ch in tokens[i]:
+                ch_width = draw.textlength(ch, font=font)
+                if line_width + ch_width > max_pixel_width and line:
+                    lines.append(line)
+                    line = ""
+                    line_width = 0
+                line += ch
+                line_width += ch_width
+        i += 1
+
     if line:
         lines.append(line)
 
-    return "\n".join(lines)
+    return lines
+
+def render_line_with_emojis(draw, line: str, font, area_left:int, area_right: int, y:int, emoji_dir="nyax/emoji", fill=(255,255,255)):
+    line_width = 0
+    tokens = EMOJI_PATTERN.split(line)
+    for i, token in enumerate(tokens):
+        if i % 2 == 1:
+            line_width += font.size
+        else:
+            line_width += draw.textlength(token, font=font)
+    area_width = area_right - area_left
+    x = area_left + (area_width - line_width) // 2
+    for i, token in enumerate(tokens):
+        if i % 2 == 1:
+            emoji_id = token
+            emoji_path = f"{emoji_dir}/{emoji_id}.svg"
+            if os.path.exists(emoji_path):
+                try:
+                    png_data = cairosvg.svg2png(url=emoji_path)
+                    emoji_img = Image.open(BytesIO(png_data)).convert("RGBA")
+                    orig_w, orig_h = emoji_img.size
+                    target_h = font.size
+                    target_w = int(orig_w * (targeth / orig_h))
+                    emoji_img = emoji_img.resize((target_w, target_h))
+                    bg = Image.new("RGB", (target_w, target_h), (255, 255, 255))
+                    bg.paste(emoji_img, (0, 0), emoji_img)
+                    draw.bitmap((x, y), bg, fill=None)
+                    x += target_w
+                except Exception:
+                    token_text= f"_{emoji_id}_"
+                    draw.text((x, y), token_text, font=font, fill=fill)
+                    x += draw.textlength(token_text, font=font)
+            else:
+                draw.text((x, y), token, font=font, fill=fill)
+                x += draw.textlength(token, font=font)
+
+def draw_quote_with_emojis(draw, quote:str, font, area_left: int, area_right: int, area_heigth: int, start_y: int, emoji_dir="nyax/emoji", fill=(255, 255, 255)):
+    max_pixel_width = area_right - area_left - 40
+    lines = wrap_text_by_pixel_with_emojis(draw, quote, font, max_pixel_width)
+    total_height = len(lines) * (font.size + 5)
+    y = start_y + (area_heigth - total_height) // 2
+    for line in lines:
+        render_line_with_emojis(draw, line, font, area_left, area_right, y, emoji_dir, fill)
+        y += font.size + 5
 
 def draw_centered_multiline(draw, text_lines, font, area_left, area_right, start_y, fill, line_spacing=5):
-    """
-    各行を中央揃えで描画する関数
-    """
     area_width = area_right - area_left
     y = start_y
     for line in text_lines:
@@ -36,11 +111,13 @@ def draw_centered_multiline(draw, text_lines, font, area_left, area_right, start
         draw.text((x, y), line, font=font, fill=fill)
         y += font.size + line_spacing
 
-def create_quote_image(icon: BytesIO, content:str, author:str, color:bool = None) -> BytesIO:
+def create_quote_image(width:int, height:int, icon: BytesIO, content:str, author:str, color:bool = None) -> BytesIO:
     """
     Make it a Quoteを作成します。
     Generated by Microsoft Copilot
     Args:
+        width (int): 横幅
+        height (int): 縦幅
         icon (BytesIO): アイコン
         content (str): 内容
         author (str): 著者
@@ -48,7 +125,6 @@ def create_quote_image(icon: BytesIO, content:str, author:str, color:bool = None
     Returns:
         BytesIO: 画像のデータ
     """
-    width, height = 800, 400
     log = get_log("miq.create_quote_image")
 
     img = Image.new("RGB", (width, height), color=(0, 0, 0))
@@ -82,53 +158,54 @@ def create_quote_image(icon: BytesIO, content:str, author:str, color:bool = None
     black_area = Image.new("RGB", (grad_width, height), color=(0, 0, 0))
     img.paste(black_area, (height, 0), mask=gradient)
 
-    font_quote = ImageFont.truetype("font/miq_n.ttf", 28)
-    font_author = ImageFont.truetype("font/miq_n.ttf", 20)
-    font_signature = ImageFont.truetype("font/miq_s.ttf", 15)
-
-    max_text_width = width - height - 40
-    wrapped_quote = wrap_text_by_pixel(draw, content, font_quote, max_text_width)
-    quote_lines = wrapped_quote.split("\n")
-    log.debug(wrapped_quote)
-
-    total_text_height = len(quote_lines) * (font_quote.size + 5)
-    start_y = (height - total_text_height) // 2 - 20
-
-    draw_centered_multiline(
+    font_path = "font/miq_n.ttf"
+    font_sig = "font/miq_s.ttf"
+    quote_lines, font_quote = adjust_font_size(
         draw,
-        quote_lines,
-        font_quote,
-        area_left=height,
-        area_right=width,
-        start_y=start_y,
-        fill=(255, 255, 255),
-        line_spacing=5
+        content,
+        font_path,
+        max_pixel_width=width - height - 40,
+        max_height = height // 2,
+        initial_size=25,
+        min_size=15
+    )
+    author_lines, font_author = adjust_font_size(
+        draw,
+        author,
+        font_path,
+        max_pixel_width=width - height - 40,
+        max_height=height // 4,
+        initial_size=20,
+        min_size=15
     )
 
-    wrapped_author = wrap_text_by_pixel(draw, author, font_author, max_text_width)
-    author_lines = wrapped_author.split("\n")
+    draw_quote_with_emojis(
+        draw,
+        content,
+        font_quote,
+        height,
+        width,
+        height,
+        0,
+        emoji_dir=emoji_dire
+    )
 
     total_author_height = len(author_lines) * (font_author.size + 5)
-    start_y_author = start_y + total_text_height + 10
-
-    draw_centered_multiline(
-        draw,
-        author_lines,
-        font_author,
-        area_left=height,
-        area_right=width,
-        start_y=start_y_author,
-        fill=(200, 200, 200),
-        line_spacing=5
-    )
+    start_y_author = (height - total_author_height) // 2 + height // 4
+    for line in author_lines:
+        line_width = draw.textlength(line, font=font_author)
+        x = height + (width - height - line_width) // 2
+        draw.text((x, start_y_author), line, font=font_author, fill=(200, 200, 200))
+        start_y_author += font_author.size + 5
 
     signature = "NyaXBot@1340"
+    font_signature = ImageFont.truetype(font_sig, 20)
     bbox_sig = draw.textbbox((0, 0), signature, font=font_signature)
     sig_w = bbox_sig[2] - bbox_sig[0]
     sig_h = bbox_sig[3] - bbox_sig[1]
     pos_sig = (
         width - sig_w - 10,
-        height - sig_h -10
+        height - sig_h - 10
     )
     draw.text(pos_sig, signature, font=font_signature, fill=(150, 150, 150))
 

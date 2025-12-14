@@ -28,11 +28,14 @@ import aioboto3
 from func.r2 import upload_fileobj
 from func.miq import create_quote_image
 import io
+from os import listdir
+from PIL import Image, ImageDraw, ImageFont
 # 汎用系
 from typing import Tuple
 import uuid
 import re
 from datetime import datetime, timezone
+from func.other import crlf
 
 # トークンとか
 DISCORD_TOKEN: str = getenv("DISCORD_TOKEN")
@@ -84,7 +87,7 @@ async def sendNotification(recipientId:str, message:str, openHash:str=""):
         response = (
             await supabase.rpc("send_notification_with_timestamp", {
                 "recipient_id": recipientId,
-                "message_text": message,
+                "message_text": crlf(message),
                 "open_hash": openHash
             })
             .execute()
@@ -105,7 +108,7 @@ async def send_dm_message(dmid:str,message:str):
             "id": str(uuid.uuid4()),
             "time": datetime.now(timezone.utc).isoformat(timespec="microseconds"),
             "userid": currentUser["id"],
-            "content": message,
+            "content": crlf(message),
             "attachments": [],
             "read": [currentUser["id"]]
         }
@@ -123,7 +126,7 @@ async def send_system_dm_message(dmid:str, message:str):
             "id": str(uuid.uuid4()),
             "time": datetime.now(timezone.utc).isoformat(timespec="microseconds"),
             "type": "system",
-            "content": message
+            "content": crlf(message)
         }
         await supabase.rpc("append_to_dm_post", {
             "dm_id_in": dmid,
@@ -148,7 +151,7 @@ async def send_post(content:str = None, reply_id:str = None, repost_id:str = Non
         #ポストの送信
         newPost = (
             await supabase.rpc("create_post_new", {
-                "p_content": content,
+                "p_content": crlf(content),
                 "p_reply_id": reply_id,
                 "p_repost_to": repost_id,
                 "p_attachments": attachments,
@@ -292,6 +295,11 @@ async def handle_notification_message(notification):
                     await like(postid)
                     await supabase.rpc('mark_all_notifications_as_read', {"p_user_id":currentUser["id"]}).execute()
                     await bot_stop()
+                if("/debug_user" in message["content"]):
+                    mainPost = (await get_hydrated_posts([postid]))[0]
+                    rep = mainPost["reply_to_post"]
+                    if(rep):
+                        print(rep["author"])
             if("/miq" in message["content"]):
                 log.debug("MIQ")
                 mainPost = (await get_hydrated_posts([postid]))[0]
@@ -344,6 +352,17 @@ async def handle_notification_message(notification):
     finally:
         notifications_id.append(notification["id"])
 
+async def getUserIconUrl(user):
+    if(user["icon_data"]):
+        icon_url = (
+            await supabase.storage
+            .from_("nyax")
+            .get_public_url(user["icon_data"])
+        )
+    else:
+        icon_url = f"{SUPABASE_URL}/functions/v1/getScratchUserIcon?id={user['scid']}"
+    return icon_url
+
 async def create_miq(mes:dict, color:bool) -> str:
     """
     Make it a Quoteを作成し、SupabaseのStorageにUploadします
@@ -355,12 +374,11 @@ async def create_miq(mes:dict, color:bool) -> str:
     """
     log = get_log("create_miq")
     try:
-        log.debug(mes["author"]["icon_data"])
-        avatar_url_res = (
-            await supabase.storage
-            .from_("nyax")
-            .get_public_url(mes["author"]["icon_data"])
-        )
+        width, height = 800, 400
+        log.info(f"MIQを作成中...(w:{width}, h:{height})")
+        log.info(f"{mes['author']['name']}のアイコンを取得中...")
+
+        avatar_url_res = await getUserIconUrl(mes["author"])
         log.debug(avatar_url_res)
         miq_header = {
             "Authorization": f"Bearer {SUPABASE_ANON_KEY}"
@@ -369,14 +387,22 @@ async def create_miq(mes:dict, color:bool) -> str:
             async with a_session.get(avatar_url_res) as resp:
                 if(resp.status == 200):
                     icon_data = await resp.read()
-                    log.debug(icon_data)
+                    # log.debug(icon_data)
                     icon = io.BytesIO(icon_data)
                 else:
                     raise Exception(await resp.json())
-        log.debug(icon)
-        img = await asyncio.to_thread(create_quote_image, icon, mes["content"], f"{mes['author']['name']}@{mes['author']['id']}", color)
+        # log.debug(icon)
+        log.info("アイコン取得完了")
+        log.info("MIQ画像を作成中...")
+        if(mes["content"].startswith("!")):
+            miq_quote = mes["content"][1:]
+        else:
+            miq_quote = mes["content"]
+        img = await asyncio.to_thread(create_quote_image, width, height, icon, miq_quote, f"{mes['author']['name']}@{mes['author']['id']}", color)
         if(not img):
             return
+        log.info("MIQ画像作成完了")
+        log.info("アップロード中...")
         async with aiohttp.ClientSession() as a_session:
             data = aiohttp.FormData()
             data.add_field("file", img, filename=f"{mes['id']}.jpg", content_type="image/jpeg")
@@ -387,6 +413,7 @@ async def create_miq(mes:dict, color:bool) -> str:
         if("error" in res_data):
             raise Exception(f"ファイルアップロードエラー:{res_data['error']}")
         fileid = res_data["fileId"]
+        log.info(f"FileID:{fileid}で作成。")
         return fileid
     except Exception as e:
         log.error(f"Miqの作成時にエラーが発生しました。\n{e}")
@@ -417,9 +444,11 @@ async def status_update(status):
 https://github.com/aoku151/nyax-bot/
 
 ステータス:{status}"""
+        # log.debug(repr(crlf(message)))
+        # log.debug(crlf(message))
         updatedData = {
             "name": "非公式NyaXBot",
-            "me": message,
+            "me": crlf(f"NyaXBot  ステータス:{status}"),
             "settings": {
                 "show_like": False,
                 "show_follow": True,
@@ -462,12 +491,7 @@ async def main():
             global log_channel, console_task, s3, s3_session
             console_task = asyncio.create_task(console_input())
             log.info(f"Discord:{bot.user}としてログインしました^o^")
-            try:
-                synced = await bot.tree.sync()
-                log.info(f"{len(synced)}個のコマンドを同期しました。")
-                log_channel = bot.get_guild(1440680053867286560).get_channel(1440680171890933863)
-            except Exception as e:
-                log.error(f"コマンドの同期中にエラーが発生しました。\n{e}")
+            log_channel = bot.get_guild(1440680053867286560).get_channel(1440680171890933863)
             try:
                 await handle_notification()
                 subscribe_dm.start()
@@ -475,8 +499,19 @@ async def main():
                 await nyax_feed.subscribe()
             except Exception as e:
                 log.error(f"初期動作の実行中にエラーが発生しました。\n{e}")
-            # await supabase.rpc("create_post", {"p_content": "NyaXBotが起動しました!", "p_reply_id": None, "p_repost_to": None, "p_attachments": None}).execute()
+            # await send_post(content="NyaXBotが起動しました!")
             await log_channel.send("NyaXBotが起動しました!")
+
+        @bot.event
+        async def setup_hook():
+            try:
+                for cog in listdir("cogs"):
+                    if cog.endswith(".py"):
+                        await bot.load_extension(f"cogs.{cog[:-3]}")
+                synced = await bot.tree.sync()
+                log.info(f"{len(synced)}個のコマンドを同期しました。")
+            except Exception as e:
+                log.error(f"コマンドの同期中にエラーが発生しました。")
 
         nyax_feed = supabase.channel("nyax-feed")
 
