@@ -1,0 +1,3 @@
+[submodule "nyax"]
+	path = nyax
+	url = https://github.com/Itsuki0222/NyaX.git

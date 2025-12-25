@@ -13,9 +13,13 @@ audioop-lts==0.2.2
 beautifulsoup4==4.14.3
 boto3==1.40.61
 botocore==1.40.61
+cairocffi==1.7.1
+CairoSVG==2.8.2
 certifi==2025.11.12
 cffi==2.0.0
 cryptography==46.0.3
+cssselect2==0.8.0
+defusedxml==0.7.1
 deprecation==2.1.0
 discord.py==2.6.4
 frozenlist==1.8.0
@@ -48,9 +52,11 @@ StrEnum==0.4.15
 supabase==2.25.0
 supabase-auth==2.25.0
 supabase-functions==2.25.0
+tinycss2==1.5.1
 typing-inspection==0.4.2
 typing_extensions==4.15.0
 urllib3==2.5.0
+webencodings==0.5.1
 websockets==15.0.1
 wrapt==1.17.3
 yarl==1.22.0
