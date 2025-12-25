@@ -38,7 +38,7 @@ pydantic_core==2.41.5
 PyJWT==2.10.1
 python-dateutil==2.9.0.post0
 python-dotenv==1.2.1
-realtime==2.25.0
+realtime==2.27.0
 s3transfer==0.14.0
 scapi==3.2.0
 six==1.17.0
