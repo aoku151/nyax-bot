@@ -1,5 +1,5 @@
 # まとめる必要がないヘッダー
-header = {"Content-Type": "application/json"}
+header = {"Content-Type": "application/json", "Origin": "https://nyax-bot-aoku.pages.dev"}
 
 # DMで使えるコマンドのリスト
 dmCommandList = [
