@@ -5,7 +5,7 @@
 ---
 
 # Software & Main Library
-- Python 3.12.9
+- Python 3.13.7
 - asyncio
 - Supabase (AsyncClient)
 - aiohttp
