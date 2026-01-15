@@ -19,6 +19,7 @@ import json
 import logging
 from func.log import get_log, stream_handler
 import aioconsole
+import signal
 # Supabase系
 from supabase import acreate_client, AsyncClient
 from func.session import Sessions
@@ -50,6 +51,11 @@ intents = discord.Intents.all()
 bot = MyBot(command_prefix="!", intents=intents)
 
 main_log = get_log("Main")
+
+shutdown_event = asyncio.Event()
+
+def handle_sigterm():
+    shutdown_event.set()
 
 # Raspberry Pi Connectで^Cが使えないため
 async def console_input():
@@ -478,6 +484,9 @@ async def main():
     log = main_log
     global currentUser, supabase, session
     try:
+        loop = asyncio.get_running_loop()
+        loop.add_signal_handler(signal.SIGTERM, handle_sigterm)
+        loop.add_signal_handler(signal.SIGINT, handle_sigterm)
         # Supabaseのログイン
         supabase, session = await sessions.get_supabase()
         # session = await supabase.auth.get_session()
@@ -559,7 +568,11 @@ async def main():
             callback=lambda payload: asyncio.create_task(handle_notification(payload))
         )
 
-        await bot.start(DISCORD_TOKEN)
+        bot_task = asyncio.create_task(bot.start(DISCORD_TOKEN))
+        await shutdown_event.wait()
+        log.info("SIGTERM reived. Shutting down...")
+        await bot_stop()
+        await bot_task
     except Exception as e:
         log.error(f"BOTの起動中にエラーが発生しました\n{e}")
 
