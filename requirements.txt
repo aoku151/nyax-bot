@@ -46,7 +46,7 @@ PyJWT==2.10.1
 python-dateutil==2.9.0.post0
 python-dotenv==1.2.1
 pytk==0.0.2.1
-realtime==2.25.0
+realtime==2.27.2
 regex==2026.1.15
 s3transfer==0.14.0
 scapi==3.1.4
