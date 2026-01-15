@@ -54,7 +54,7 @@ setuptools==80.9.0
 setuptools-scm==9.2.2
 six==1.17.0
 soupsieve==2.8
-storage3==2.25.0
+storage3==2.27.2
 StrEnum==0.4.15
 supabase==2.25.0
 supabase-auth==2.25.0
