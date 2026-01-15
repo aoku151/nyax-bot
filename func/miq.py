@@ -4,11 +4,40 @@ from io import BytesIO
 import textwrap
 from func.log import get_log
 import cairosvg
-import re
+import regex as re
 import os
 
 EMOJI_PATTERN = re.compile(r'_([a-zA-Z0-9\-]+)_')
 emoji_dire = "nyax/emoji"
+
+def extract_unicode_emojis(text):
+    # 絵文字の grapheme cluster を抽出
+    return [c for c in re.findall(r'\X', text) if any(ord(ch) > 0x1F000 for ch in c)]
+
+def unicode_to_twemoji_filename(text):
+    # grapheme cluster（絵文字1つ）を抽出
+    clusters = re.findall(r'\X', text)
+
+    # 1つの絵文字だけ扱う
+    emoji = clusters[0]
+
+    # 各コードポイントを16進数に
+    codepoints = [f"{ord(c):x}" for c in emoji]
+
+    # Twemoji のファイル名形式にする
+    return "-".join(codepoints) + ".png"
+
+def load_twemoji_png(emoji_char, target_h, twemoji_dir="twemoji/72x72"):
+    filename = unicode_to_twemoji_filename(emoji_char)
+    path = os.path.join(twemoji_dir, filename)
+
+    if not os.path.exists(path):
+        return None
+
+    img = Image.open(path).convert("RGBA")
+    ow, oh = img.size
+    tw = int(ow * (target_h / oh))
+    return img.resize((tw, target_h), Image.LANCZOS)
 
 def adjust_font_size(draw, text: str, font_path: str, max_pixel_width: int, max_height: int, initial_size: int, min_size: int = 15, emoji_dir="nyax/emoji"): 
     size = initial_size 
@@ -127,8 +156,20 @@ def render_line_with_emojis(img, draw, line: str, font, area_left: int, area_rig
                 draw.text((x, y), text, font=font, fill=fill) 
                 x += draw.textlength(text, font=font) 
         else: 
-            draw.text((x, y), token, font=font, fill=fill) 
-            x += draw.textlength(token, font=font)
+            emojis = extract_unicode_emojis(token)
+            if emojis:
+                for ch in emojis:
+                    twemoji_img = load_twemoji_png(ch, font.size)
+                    if twemoji_img:
+                        tw, th = twemoji_img.size
+                        img.paste(twemoji_img, (int(x), int(y)), twemoji_img)
+                        x += tw
+                    else:
+                        draw.text((x, y), token, font=font, fill=fill) 
+                        x += draw.textlength(token, font=font)
+            else:
+                draw.text((x, y), token, font=font, fill=fill) 
+                x += draw.textlength(token, font=font)
     
 
 def draw_quote_with_emojis(img, draw, quote: str, font, area_left: int, area_right: int, area_height: int, start_y: int, emoji_dir="nyax/emoji", fill=(255,255,255)): 
