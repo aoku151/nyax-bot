@@ -272,6 +272,43 @@ async def subscribe_dm():
     except Exception as e:
         log.error(f"DMの処理中にエラーが発生しました。\n{e}")
 
+@tasks.loop(seconds=5)
+async def handle_notification():
+    global currentUser
+    log = get_log("handle_notification")
+    try:
+        session = await supabase.auth.get_session()
+        response = (
+            await supabase.table("user")
+            .select("notice")
+            .eq("id", currentUser["id"])
+            .execute()
+        )
+        result = response.data[0]
+        # log.debug(result)
+        notices = result["notice"]
+        noti_count = 0
+        for n_obj in notices:
+            notification = None
+            if(type(n_obj) is dict):
+                notification = n_obj
+            else:
+                notification = {"id": uuid.uuid4(), "message": n_obj, "open": "", "click": True}
+            if(notification["click"] is not True):
+                log.debug(notification)
+                log.debug(notification["message"])
+                # await log_channel.send(notification["message"])
+                await handle_notification_message(notification)
+                noti_count += 1
+        if(noti_count != 0):
+            await supabase.rpc('mark_all_notifications_as_read', {"p_user_id":currentUser["id"]}).execute()
+        if(currentUser["notice"]):
+            for i in currentUser["notice"]:
+                i["click"] = True
+        currentUser["notice_count"] = 0
+    except Exception as e:
+        log.error(f"通知の取得にエラーが発生しました。\n{e}")
+
 notifications_id = []
 async def handle_notification_message(notification):
     """
@@ -502,10 +539,11 @@ async def main():
             log.info(f"Discord:{bot.user}としてログインしました^o^")
             log_channel = bot.get_guild(1440680053867286560).get_channel(1440680171890933863)
             try:
-                await handle_notification()
+                #await handle_notification()
                 subscribe_dm.start()
+                handle_notification.start()
                 await status_update("起動中")
-                await nyax_feed.subscribe()
+                # await nyax_feed.subscribe()
             except Exception as e:
                 log.error(f"初期動作の実行中にエラーが発生しました。\n{e}")
             # await send_post(content="NyaXBotが起動しました!")
@@ -520,53 +558,15 @@ async def main():
                 synced = await bot.tree.sync()
                 log.info(f"{len(synced)}個のコマンドを同期しました。")
             except Exception as e:
-                log.error(f"コマンドの同期中にエラーが発生しました。")
+                log.error(f"コマンドの同期中にエラーが発生しました。"
 
-        nyax_feed = supabase.channel("nyax-feed")
-
-        async def handle_notification(payload = None):
-            global currentUser
-            log = get_log("handle_notification")
-            try:
-                session = await supabase.auth.get_session()
-                response = (
-                    await supabase.table("user")
-                    .select("notice")
-                    .eq("id", currentUser["id"])
-                    .execute()
-                )
-                result = response.data[0]
-                # log.debug(result)
-                notices = result["notice"]
-                noti_count = 0
-                for n_obj in notices:
-                    notification = None
-                    if(type(n_obj) is dict):
-                        notification = n_obj
-                    else:
-                        notification = {"id": uuid.uuid4(), "message": n_obj, "open": "", "click": True}
-                    if(notification["click"] is not True):
-                        log.debug(notification)
-                        log.debug(notification["message"])
-                        # await log_channel.send(notification["message"])
-                        await handle_notification_message(notification)
-                        noti_count += 1
-                if(noti_count != 0):
-                    await supabase.rpc('mark_all_notifications_as_read', {"p_user_id":currentUser["id"]}).execute()
-                if(currentUser["notice"]):
-                    for i in currentUser["notice"]:
-                        i["click"] = True
-                currentUser["notice_count"] = 0
-            except Exception as e:
-                log.error(f"通知の取得にエラーが発生しました。\n{e}")
-
-        nyax_feed.on_postgres_changes(
-            event="UPDATE",
-            schema="public",
-            table="user",
-            filter=f"id=eq.{currentUser['id']}",
-            callback=lambda payload: asyncio.create_task(handle_notification(payload))
-        )
+        # nyax_feed.on_postgres_changes(
+        #     event="UPDATE",
+        #     schema="public",
+        #     table="user",
+        #     filter=f"id=eq.{currentUser['id']}",
+        #     callback=lambda payload: asyncio.create_task(handle_notification(payload))
+        # )
 
         bot_task = asyncio.create_task(bot.start(DISCORD_TOKEN))
         await shutdown_event.wait()
