@@ -572,7 +572,7 @@ async def main():
                 synced = await bot.tree.sync()
                 log.info(f"{len(synced)}個のコマンドを同期しました。")
             except Exception as e:
-                log.error(f"コマンドの同期中にエラーが発生しました。"
+                log.error(f"コマンドの同期中にエラーが発生しました。")
 
         # nyax_feed.on_postgres_changes(
         #     event="UPDATE",
