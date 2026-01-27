@@ -362,6 +362,8 @@ async def handle_notification_message(notification):
                 rep = mainPost["reply_to_post"]
                 if(rep):
                     color = "!c" in message["content"]
+                    _reply_id = None if "!tl" in message["content"] else postid
+                    prefix = f"{getenv("MAIN")}/#post/{postid}より作成されました。\n" if "!tl" in message["content"] else ""
                     fileid = await create_miq(rep, color)
                     if(not fileid):
                         return
@@ -370,7 +372,7 @@ async def handle_notification_message(notification):
                         "id":fileid,
                         "name": f"{rep['id']}.jpg"
                     }]
-                    await send_post(content = "Make it a Quote画像を生成しました！", reply_id = postid, attachments = amdata)
+                    await send_post(content = f"{prefix}Make it a Quote画像を生成しました！", reply_id = _reply_id, attachments = amdata)
                 else:
                     await send_post(content = "返信を使用してください。", reply_id = postid)
             if("おはよう" in message["content"]):
