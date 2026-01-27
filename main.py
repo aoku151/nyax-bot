@@ -53,6 +53,7 @@ bot = MyBot(command_prefix="!", intents=intents)
 main_log = get_log("Main")
 
 shutdown_event = asyncio.Event()
+bot_task = None
 
 Can_Stop = [
     6999,
@@ -78,6 +79,7 @@ async def bot_stop():
     main_log.info("Stop.")
     await status_update("停止中")
     await bot.close()
+    await bot_task
 
 # グローバル変数
 supabase: AsyncClient = None
@@ -363,7 +365,8 @@ async def handle_notification_message(notification):
                 if(rep):
                     color = "!c" in message["content"]
                     _reply_id = None if "!tl" in message["content"] else postid
-                    prefix = f"{getenv("MAIN")}/#post/{postid}より作成されました。\n" if "!tl" in message["content"] else ""
+                    _repost_id = rep["id"] if "!tl" in message["content"] else None
+                    prefix = f"Make it a quoteを生成しました! リクエスト者:{re.search(r'@[0-9]{4}', notification['message'])[0]}" if "!tl" in message["content"] else "Make it a Quote画像を生成しました！"
                     fileid = await create_miq(rep, color)
                     if(not fileid):
                         return
@@ -372,7 +375,12 @@ async def handle_notification_message(notification):
                         "id":fileid,
                         "name": f"{rep['id']}.jpg"
                     }]
-                    await send_post(content = f"{prefix}Make it a Quote画像を生成しました！", reply_id = _reply_id, attachments = amdata)
+                    await send_post(
+                        content = prefix,
+                        reply_id = _reply_id,
+                        repost_id = _repost_id,
+                        attachments = amdata
+                    )
                 else:
                     await send_post(content = "返信を使用してください。", reply_id = postid)
             if("おはよう" in message["content"]):
@@ -533,7 +541,7 @@ async def main():
     Botメイン機構
     """
     log = main_log
-    global currentUser, supabase, session
+    global currentUser, supabase, session, bot_task
     try:
         loop = asyncio.get_running_loop()
         loop.add_signal_handler(signal.SIGTERM, handle_sigterm)
@@ -586,7 +594,7 @@ async def main():
         await shutdown_event.wait()
         log.info("SIGTERM reived. Shutting down...")
         await bot_stop()
-        await bot_task
+        #await bot_task
     except Exception as e:
         log.error(f"BOTの起動中にエラーが発生しました\n{e}")
 
