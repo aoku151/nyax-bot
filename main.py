@@ -54,6 +54,14 @@ main_log = get_log("Main")
 
 shutdown_event = asyncio.Event()
 
+Can_Stop = [
+    6999,
+    5355,
+    2872,
+    7549,
+    2525
+]
+
 def handle_sigterm():
     shutdown_event.set()
 
@@ -333,7 +341,11 @@ async def handle_notification_message(notification):
                 .eq("id", postid)
                 .execute()
             ).data[0]
-            if("@4332さん" in notification["message"]):
+            isDebug = False
+            for i in Can_Stop:
+                if f"@{i}さん" in notification["message"]:
+                    isDebug = True
+            if(isDebug):
                 if("/finish" in message["content"]):
                     await like(postid)
                     await supabase.rpc('mark_all_notifications_as_read', {"p_user_id":currentUser["id"]}).execute()
