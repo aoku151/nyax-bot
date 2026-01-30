@@ -37,6 +37,7 @@ import uuid
 import re
 from datetime import datetime, timezone
 from func.other import crlf
+from pydantic import BaseModel
 
 # トークンとか
 DISCORD_TOKEN: str = getenv("DISCORD_TOKEN")
@@ -151,6 +152,28 @@ async def send_system_dm_message(dmid:str, message:str):
     except Exception as e:
         log.error(f"DMのシステムメッセージ送信中にエラーが発生しました。")
 
+queue = []
+
+async def post_task(data:dict):
+    global queue
+    log = get_log("post_task")
+    asyncio.sleep(data["second"])
+    content = data["content"] if "content" in data else None
+    reply_id = data["reply_id"] if "reply_id" in data else None
+    repost_id = data["repost_id"] if "repost_id" in data else None
+    attachments = data["attachments"] if "attachments" in data else None
+    mask = data["mask"]
+    await send_post(
+        content=content,
+        reply_id=reply_id,
+        repost_id=repost_id,
+        attachments=attachments,
+        mask=mask
+    )
+    queue.pop(0)
+    if len(queue) != 0:
+        await post_task(queue[0])
+
 async def send_post(content:str = None, reply_id:str = None, repost_id:str = None, attachments:list = None, mask:bool = False):
     """
     ポストをします。
@@ -162,6 +185,7 @@ async def send_post(content:str = None, reply_id:str = None, repost_id:str = Non
     Todo:
         * リポスト時の通知処理の移植
     """
+    global queue
     log = get_log("send_post")
     try:
         #ポストの送信
@@ -199,6 +223,24 @@ async def send_post(content:str = None, reply_id:str = None, repost_id:str = Non
         for id in mentioned_ids:
             await sendNotification(id, f"@{currentUser['id']}さんがあなたをメンションしました。", f"#post/{newPost['id']}")
     except Exception as e:
+        if "ポストの間隔が短いようです" in e.error["message"]:
+            if len(queue) == 0:
+                m = re.match(r'あと([0-9]+)秒お待ちください', e.error["message"])
+            else:
+                m = re.match(r'ポスト後([0-9]+)秒経過するまでポストできません', e.error["message"])
+            sec = m.group(1)
+            d = {"second":int(sec)}
+            if content:
+                d["content"] = content
+            if reply_id:
+                d["reply_id"] = reply_id
+            if repost_id:
+                d["repost_id"] = repost_id
+            if attachments:
+                d["attachments"] = attachments
+            d["mask"] = mask
+            queue.append(d)
+            asyncio.create_task(post_task())
         log.error(f"ポスト中にエラーが発生しました。\n{e}")
 
 async def get_hydrated_posts(ids:list, profile:bool = False) -> list[dict]:
