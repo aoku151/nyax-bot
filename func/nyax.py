@@ -5,10 +5,10 @@ import supabase as Supabase
 from supabase import acreate_client, AsyncClient
 from typing import Literal
 from pydantic import BaseModel
+from datetime import datetime
 load_dotenv()
 
 class Setting_Data(BaseModel):
-    
     show_like:bool
     show_follow:bool
     show_follower:bool
@@ -19,22 +19,37 @@ class Setting_Data(BaseModel):
     emoji:Literal["twemoji", "emojione", "default"]
     theme:literal["auto", "light", "dark"]
 
+class Notice:
+    def __init__(self, nd:dict):
+        self.id:str = nd["id"]
+        self.open:str = nd["open"]
+        self.click:bool = nd["click"]
+        self.message:str = nd["message"]
+
 class CurrentUser:
-    def __init__(self):
-        self.id:int = None
-        self.uuid:str = None
-        self.scid:str = None
-        self.name:str = None
-        self.me:str = None
-        self.icon_data:str = None
-        self.settings
-        self.pin:str = None
-        self.like:list[str] = None
-        self.star:list[str] = None
-        self.follow:list[int] = None
-        self.block:list[int] = None
-        self.admin:bool = None
-        self.notice
+    def __init__(self, cd:dict):
+        notices:list[Notice] = []
+        for i in cd["notice"]:
+            notices.append(Notice(i))
+        self.id:int = cd["id"]
+        self.uuid:str = cd["uuid"]
+        self.scid:str = cd["scid"]
+        self.name:str = cd["name"]
+        self.me:str = cd["me"]
+        self.icon_data:str = cd["icon_data"]
+        self.settings:Setting_Data = cd["settings"]
+        self.like:list[str] = cd["like"]
+        self.star:list[str] = cd["star"]
+        self.follow:list[int] = cd["follow"]
+        self.admin:bool = cd["admin"]
+        self.verify:bool = cd["verify"]
+        self.freeze = cd["frieze"]
+        self.notice:list[Notice] = notices
+        self.notice_count:int = cd["notice_count"]
+        self.time:str = cd["time"]
+        self.dtime:datetime = datetime.fromisoformat(cd["time"])
+        self.block:list[int] = cd["block"]
+        self.pin:str = cd["pin"]
     
 
 class NyaXClient:
