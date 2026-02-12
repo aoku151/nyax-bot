@@ -9,6 +9,7 @@ from datetime import datetime, timezone
 from func.log import get_log
 from func.other import crlf
 import uuid
+import aiohttp
 load_dotenv()
 
 class Setting_Data(BaseModel):
@@ -53,6 +54,50 @@ class CurrentUser:
         self.dtime:datetime = datetime.fromisoformat(cd["time"])
         self.block:list[int] = cd["block"]
         self.pin:str = cd["pin"]
+
+class Attachment:
+    def __init__(self, ad:dict):
+        self.id = ad["id"]
+        self.name = ad["id"]
+        self.type = ad["type"]
+
+class Post:
+    def __init__(self, client:NyaXClient, pd:dict):
+        self.nyaxclient:NyaXClient = client
+        attachments:list[Attachment] = []
+        for i in pd["attachments"]:
+            attachments.append(Attachment(i))
+        self.id:str = pd["id"]
+        self.userid:int = pd["userid"]
+        self.content:str = pd["content"]
+        self.attachments:list = attachments
+        self.reply_id:str = pd["reply_id"]
+        self.time:str = pd["time"]
+        self.dtime:datetime = datetime.fromisoformat(pd["time"])
+        self.repost_to:Post = Post(pd["repost_to"]) if pd["repost_to"] else None
+        self.mask:bool = pd["mask"]
+        self.author:dict = pd["author"]
+        self.reply_to_post = pd["reply_to_post"]
+        self.reposted_post:Post = Post(pd["reposted_post"])
+
+    async def reply(self, content:str = None, attachments:list = None, mask:bool = False):
+        await self.nyaxclient.send_post(
+            content = content,
+            reply_id = self.id,
+            attachments = attachments,
+            mask = mask
+        )
+    async def repost(self):
+        await self.nyaxclient.send_post(
+            repost_id = self.id
+        )
+
+    async def like(self):
+        await supabase.rpc("handle_like", {"p_post_id": self.id}).execute()
+
+    async def star(self):
+        await supabase.rpc("handle_star", {"p_post_id": self.id}).execute()
+
     
 
 class NyaXClient:
@@ -66,6 +111,8 @@ class NyaXClient:
             scpass (str): Scratchのパスワード
             session_path (:obj:`str`, optional): セッション管理ファイルの名称。必ず初期化時に{}を書き込んでおくこと。
         """
+        self.supabase_url:str = supabase_url
+        self.supabase_token:str = supabase_token
         self.sessions:Sessions = Sessions(session_path)
         supabase, session = await sessions.get_supabase()
         self.supabase:AsyncClient = supabase
@@ -190,3 +237,50 @@ class NyaXClient:
                 await sendNotification(id, f"@{self.currentUser.id}さんがあなたをメンションしました。", f"#post/{newPost['id']}")
         except Exception as e:
             log.error(f"ポスト中にエラーが発生しました。\n{e}")
+
+    async def get_hydrated_posts(self, ids:list[str], profile:bool = False) -> list[Post]:
+        """
+        ポストの詳細をまとめて取得します
+        Args:
+            ids (list): 取得するポストIDのリスト
+        """
+        log = get_log("get_hydrated_posts")
+        try:
+            async with aiohttp.ClientSession() as a_session:
+                async with a_session.post(
+                    f"{self.supabase_url}/rest/v1/rpc/get_hydrated_posts",
+                    headers={
+                        "apikey": self.supabase_token
+                        "Authorization": f"Bearer {self.supabase_token}",
+                        "Content-Type": "application/json",
+                        "Content-Profile": "public",
+                        "Origin": "https://nyax.onrender.com"
+                    },
+                    data=json.dumps({
+                        "p_post_ids": ids,
+                        "p_profile": profile
+                    }, separators=(",", ":"))
+                ) as post:
+                    data = await post.json()
+            if "error" in data:
+                raise Exception(data["error"])
+            posts:list[Post] = []
+            for i in data:
+                posts.append(Post(self, i))
+            return posts
+        except Exception as e:
+            log.error(f"ポストの情報取得中にエラーが発生しました。\n{e}")
+
+    async def get_notifications(self) -> list[Notice]:
+        response = (
+            await.supabase.table("user")
+            .select("notice")
+            .eq("id", self.currentUser.id)
+            .execute()
+        )
+        res = response.data[0]
+        notices = result["notice"]
+        notices2:list[Notice] = []
+        for i in notices:
+            notices2.append(Notice(i if type(i) is dict else {"id": uuid.uuid4(), "message": i, "open": "", "click": True}))
+        return notices2
