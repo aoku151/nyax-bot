@@ -98,7 +98,9 @@ class Post:
     async def star(self):
         await supabase.rpc("handle_star", {"p_post_id": self.id}).execute()
 
-    
+class DM:
+    def __init__(self, dd:dict):
+        pass
 
 class NyaXClient:
     async def __init__(self, supabase_url:str, supabase_token:str, scid:str, scpass:str, session_path:str = "sessions.json"):
