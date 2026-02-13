@@ -8,6 +8,7 @@ from pydantic import BaseModel
 from datetime import datetime, timezone
 from func.log import get_log
 from func.other import crlf
+from enum import Enum, auto
 import uuid
 import aiohttp
 load_dotenv()
@@ -44,12 +45,44 @@ class Setting_Data:
             return any(self._check_type(value, t) for t in get_args(expected_type))
         return isinstance(value, expected_type)
 
+class NOTICETYPE(Enum):
+    MENTION = auto()
+    REPOST = auto()
+    REPLY = auto()
+    QUOTE = auto()
+    
+    INVITE_DM = auto()
+    DELETE_DM = auto()
+    ADMIN_DM = auto()
+    
+    NYAXTEAM = auto()
+
+    OTHER = auto()
+
 class Notice:
     def __init__(self, nd:dict):
         self.id:str = nd["id"]
         self.open:str = nd["open"]
         self.click:bool = nd["click"]
         self.message:str = nd["message"]
+        self.type:NOTICETYPE = NOTICETYPE.OTHER
+        if "あなたのポストをリポストしました。" in nd["message"]:
+            self.type = NOTICETYPE.REPOST
+        elif "あなたのポストに返信しました。" in nd["message"]:
+            self.type = NOTICETYPE.REPLY
+        elif "あなたのポストを引用しました。" in nd["message"]:
+            self.type = NOTICETYPE.QUOTE
+        elif "あなたをメンションしました。" in nd["message"]:
+            self.type = NOTICETYPE.MENTION
+        elif "あなたのポストをリポストしました。" in nd["message"]:
+            self.type = NOTICETYPE.DELETE_DM
+        elif "さんから管理者権限を受け取りました。" in nd["message"]:
+            self.type = NOTICETYPE.ADMIN_DM
+        elif "さんがあなたをDMに招待しました。" in nd["message"]:
+            self.type = NOTICETYPE.INVITE_DM
+        elif "NyaXTeam" in nd["message"]:
+            self.type = NOTICETYPE.NYAXTEAM
+            
 
 class CurrentUser:
     def __init__(self, client:NyaXClient, cd:dict):
