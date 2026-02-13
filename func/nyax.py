@@ -235,7 +235,7 @@ class NyaXClient:
         """
         log = get_log("sendNotification")
         try:
-            if(not self.currentUser or not recipientId or not message or recipientId == currentUser["id"]):
+            if(not self.currentUser or not recipientId or not message or recipientId == currentUser.id):
                 return
             response = (
                 await self.supabase.rpc("send_notification_with_timestamp", {
@@ -396,3 +396,8 @@ class NyaXClient:
             formData = aiohttp.FormData()
             data.add_field("file", file)
             async with a_session.post(f"{self.nc}")
+    async def get_dm_list(self):
+        response = (
+            await supabase.table("dm")
+            .select("id, title, member,time")
+        )
