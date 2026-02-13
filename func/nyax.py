@@ -8,6 +8,7 @@ from pydantic import BaseModel
 from datetime import datetime, timezone
 from func.log import get_log
 from func.other import crlf
+from typing import Any
 import uuid
 import aiohttp
 load_dotenv()
@@ -21,8 +22,10 @@ class Setting_Data:
         self.show_scid:bool = sd["show_scid"]
         self.show_trust_label:bool = sd["show_trust_label"]
         self.default_timeline_tab:Literal["all", "foryou", "following"] = sd["show_trust_label"]
-        self.emoji:Literal["twemoji", "emojione", "default"]
-        theme:literal["auto", "light", "dark"]
+        self.emoji:Literal["twemoji", "emojione", "default"] = sd["emoji"]
+        self.theme:literal["auto", "light", "dark"] = sd["theme"]
+    def get_json(self):
+        return vars(self)
 
 class Notice:
     def __init__(self, nd:dict):
@@ -42,7 +45,7 @@ class CurrentUser:
         self.name:str = cd["name"]
         self.me:str = cd["me"]
         self.icon_data:str = cd["icon_data"]
-        self.settings:Setting_Data = cd["settings"]
+        self.settings:Setting_Data = Setting_Data(cd["settings"])
         self.like:list[str] = cd["like"]
         self.star:list[str] = cd["star"]
         self.follow:list[int] = cd["follow"]
@@ -55,6 +58,12 @@ class CurrentUser:
         self.dtime:datetime = datetime.fromisoformat(cd["time"])
         self.block:list[int] = cd["block"]
         self.pin:str = cd["pin"]
+    async def change_name(self, new_name:str):
+        updateData:dict[str, Any] = {
+            "name": new_name,
+            "me": crlf(self.me),
+            "settings": self.settings.get_json()
+        }
 
 class Attachment:
     def __init__(self, ad:dict):
