@@ -134,7 +134,7 @@ class Attachment:
 class Post:
     def __init__(self, client:NyaXClient, pd:dict):
         self.nc:NyaXClient = client
-        self.supabase = client.supabase
+        self.supabase: AsyncClient = client.supabase
         attachments:list[Attachment] = []
         for i in pd["attachments"]:
             attachments.append(Attachment(i))
