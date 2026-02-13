@@ -3,12 +3,11 @@ from dotenv import load_dotenv
 from func.session import Sessions
 import supabase as Supabase
 from supabase import acreate_client, AsyncClient
-from typing import Literal
+from typing import Literal, Any, Union, get_origin, get_args
 from pydantic import BaseModel
 from datetime import datetime, timezone
 from func.log import get_log
 from func.other import crlf
-from typing import Any
 import uuid
 import aiohttp
 load_dotenv()
@@ -24,8 +23,26 @@ class Setting_Data:
         self.default_timeline_tab:Literal["all", "foryou", "following"] = sd["show_trust_label"]
         self.emoji:Literal["twemoji", "emojione", "default"] = sd["emoji"]
         self.theme:literal["auto", "light", "dark"] = sd["theme"]
-    def get_json(self):
+    def get_dict(self):
         return vars(self)
+    def change(self, key:str, value:Union[str,bool]):
+        annotations = self.__class__.__annotations__
+        if key not in annotations:
+            raise AttributeError(f"Attribute '{key}' does not exist")
+        expected = annotations[key]
+        if not self._check_type(value, expected):
+            raise TypeError(
+                f"{key} must be {expected}, got {type(value).__name__}: {value}"
+            )
+        setattr(self, key, value)
+    def _check_type(self, value, expected_type):
+        origin = get_origin(expected_type)
+
+        if origin is Literal:
+            return value in get_args(expected_type)
+        if origin is Union:
+            return any(self._check_type(value, t) for t in get_args(expected_type))
+        return isinstance(value, expected_type)
 
 class Notice:
     def __init__(self, nd:dict):
@@ -62,8 +79,33 @@ class CurrentUser:
         updateData:dict[str, Any] = {
             "name": new_name,
             "me": crlf(self.me),
-            "settings": self.settings.get_json()
+            "settings": self.settings.get_dict(),
+            "icon_data": self.icon_data
         }
+        response = (
+            await supabase.table("user")
+            .update(updatedData)
+            .eq("id", self.id)
+            .execute()
+        ).data
+        self.name = new_name
+        return response
+
+    async def change_me(self, new_me:str):
+        updateData:dict[str, Any] = {
+            "name": self.name,
+            "me": crlf(new_me),
+            "settings": self.settings.get_dict(),
+            "icon_data": self.icon_data
+        }
+        response = (
+            await supabase.table("user")
+            .update(updatedData)
+            .eq("id", self.id)
+            .execute()
+        ).data
+        self.me = new_me
+        return response
 
 class Attachment:
     def __init__(self, ad:dict):
