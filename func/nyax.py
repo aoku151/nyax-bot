@@ -15,7 +15,7 @@ load_dotenv()
 class Setting_Data:
     def __init__(self, sd:dict):
         self.show_like:bool = sd["show_like"]
-        self.show_follow:bool = sd["show_follow]
+        self.show_follow:bool = sd["show_follow"]
         self.show_follower:bool = sd["show_follower"]
         self.show_star:bool = sd["show_star"]
         self.show_scid:bool = sd["show_scid"]
@@ -52,7 +52,9 @@ class Notice:
         self.message:str = nd["message"]
 
 class CurrentUser:
-    def __init__(self, cd:dict):
+    def __init__(self, client:NyaXClient, cd:dict):
+        self.nc:NyaXClient = client
+        self.supabase: AsyncClient = client.supabase
         notices:list[Notice] = []
         for i in cd["notice"]:
             notices.append(Notice(i))
@@ -83,7 +85,7 @@ class CurrentUser:
             "icon_data": self.icon_data
         }
         response = (
-            await supabase.table("user")
+            await self.supabase.table("user")
             .update(updatedData)
             .eq("id", self.id)
             .execute()
@@ -99,7 +101,23 @@ class CurrentUser:
             "icon_data": self.icon_data
         }
         response = (
-            await supabase.table("user")
+            await self.supabase.table("user")
+            .update(updatedData)
+            .eq("id", self.id)
+            .execute()
+        ).data
+        self.me = new_me
+        return response
+    async def change_setting(self, key:str, new_value:Union[str,bool]):
+        self.settings.change(key, new_value)
+        updateData:dict[str, Any] = {
+            "name": self.name,
+            "me": crlf(self.me),
+            "settings": self.settings.get_dict(),
+            "icon_data": self.icon_data
+        }
+        response = (
+            await self.supabase.table("user")
             .update(updatedData)
             .eq("id", self.id)
             .execute()
@@ -115,7 +133,8 @@ class Attachment:
 
 class Post:
     def __init__(self, client:NyaXClient, pd:dict):
-        self.nyaxclient:NyaXClient = client
+        self.nc:NyaXClient = client
+        self.supabase = client.supabase
         attachments:list[Attachment] = []
         for i in pd["attachments"]:
             attachments.append(Attachment(i))
@@ -133,22 +152,22 @@ class Post:
         self.reposted_post:Post = Post(pd["reposted_post"])
 
     async def reply(self, content:str = None, attachments:list = None, mask:bool = False):
-        await self.nyaxclient.send_post(
+        await self.nc.send_post(
             content = content,
             reply_id = self.id,
             attachments = attachments,
             mask = mask
         )
     async def repost(self):
-        await self.nyaxclient.send_post(
+        await self.nc.send_post(
             repost_id = self.id
         )
 
     async def like(self):
-        await supabase.rpc("handle_like", {"p_post_id": self.id}).execute()
+        await self.supabase.rpc("handle_like", {"p_post_id": self.id}).execute()
 
     async def star(self):
-        await supabase.rpc("handle_star", {"p_post_id": self.id}).execute()
+        await self.supabase.rpc("handle_star", {"p_post_id": self.id}).execute()
 
 class DM:
     def __init__(self, dd:dict):
@@ -171,7 +190,7 @@ class NyaXClient:
         supabase, session = await sessions.get_supabase()
         self.supabase:AsyncClient = supabase
         self.session = session
-        self.currentUser = CurrentUser(await sessions.get_currentUser(supabase, session))
+        self.currentUser = CurrentUser(self, await sessions.get_currentUser(supabase, session))
 
     async def sendNotification(self, recipientId:str, message:str, openHash:str=""):
         """
