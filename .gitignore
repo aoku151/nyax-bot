@@ -5,3 +5,4 @@ __pycache__/
 sessions.json
 main.py.save
 twemoji/
+.DS_Store
