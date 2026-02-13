@@ -12,16 +12,17 @@ import uuid
 import aiohttp
 load_dotenv()
 
-class Setting_Data(BaseModel):
-    show_like:bool
-    show_follow:bool
-    show_follower:bool
-    show_star:bool
-    show_scid:bool
-    show_trust_label:bool
-    default_timeline_tab:Literal["all", "foryou", "following"]
-    emoji:Literal["twemoji", "emojione", "default"]
-    theme:literal["auto", "light", "dark"]
+class Setting_Data:
+    def __init__(self, sd:dict):
+        self.show_like:bool = sd["show_like"]
+        self.show_follow:bool = sd["show_follow]
+        self.show_follower:bool = sd["show_follower"]
+        self.show_star:bool = sd["show_star"]
+        self.show_scid:bool = sd["show_scid"]
+        self.show_trust_label:bool = sd["show_trust_label"]
+        self.default_timeline_tab:Literal["all", "foryou", "following"] = sd["show_trust_label"]
+        self.emoji:Literal["twemoji", "emojione", "default"]
+        theme:literal["auto", "light", "dark"]
 
 class Notice:
     def __init__(self, nd:dict):
@@ -237,6 +238,7 @@ class NyaXClient:
                     mentioned_ids.add(mentioned_id)
             for id in mentioned_ids:
                 await sendNotification(id, f"@{self.currentUser.id}さんがあなたをメンションしました。", f"#post/{newPost['id']}")
+            return Post(self, newPost)
         except Exception as e:
             log.error(f"ポスト中にエラーが発生しました。\n{e}")
 
