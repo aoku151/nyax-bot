@@ -358,3 +358,8 @@ class NyaXClient:
         for i in notices:
             notices2.append(Notice(i if type(i) is dict else {"id": uuid.uuid4(), "message": i, "open": "", "click": True}))
         return notices2
+    async def uploadFileViaEdgeFunction(self, file):
+        async with aiohttp.ClientSession() as a_session:
+            formData = aiohttp.FormData()
+            data.add_field("file", file)
+            async with a_session.post(f"{self.nc}")
