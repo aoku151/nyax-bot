@@ -158,6 +158,33 @@ class CurrentUser:
         self.me = new_me
         return response
 
+class User:
+    def __init__(self, client:NyaXClient, cd:dict):
+        self.nc:NyaXClient = client
+        self.supabase: AsyncClient = client.supabase
+        notices:list[Notice] = []
+        for i in cd["notice"]:
+            notices.append(Notice(i))
+        self.id:int = cd["id"] if "id" in cd else None
+        self.uuid:str = cd["uuid"] if "uuid" in cd else None
+        self.scid:str = cd["scid"]
+        self.name:str = cd["name"]
+        self.me:str = cd["me"]
+        self.icon_data:str = cd["icon_data"]
+        self.settings:Setting_Data = Setting_Data(cd["settings"])
+        self.like:list[str] = cd["like"]
+        self.star:list[str] = cd["star"]
+        self.follow:list[int] = cd["follow"]
+        self.admin:bool = cd["admin"]
+        self.verify:bool = cd["verify"]
+        self.freeze = cd["frieze"]
+        self.notice:list[Notice] = notices
+        self.notice_count:int = cd["notice_count"]
+        self.time:str = cd["time"]
+        self.dtime:datetime = datetime.fromisoformat(cd["time"])
+        self.block:list[int] = cd["block"]
+        self.pin:str = cd["pin"]
+
 class Attachment:
     def __init__(self, ad:dict):
         self.id = ad["id"]
@@ -400,4 +427,10 @@ class NyaXClient:
         response = (
             await supabase.table("dm")
             .select("id, title, member,time")
-        )
+            .contains("member", [self.currentUser.id])
+            .order("time", { "ascending": False });
+            .execute()
+        ).data
+        if "error" in response:
+            raise Exception(response)
+        
