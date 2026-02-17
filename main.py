@@ -25,8 +25,6 @@ from supabase import acreate_client, AsyncClient
 from func.session import Sessions
 import supabase as Supabase
 # ファイル操作系
-import aioboto3
-from func.r2 import upload_fileobj
 from func.miq import create_quote_image
 import io
 from os import listdir
