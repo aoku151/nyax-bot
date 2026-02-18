@@ -19,7 +19,6 @@ import json
 import logging
 from func.log import get_log, stream_handler
 import aioconsole
-import signal
 # Supabase系
 from supabase import acreate_client, AsyncClient
 from func.session import Sessions
@@ -35,6 +34,7 @@ import uuid
 import re
 from datetime import datetime, timezone
 from func.other import crlf
+from pydantic import BaseModel
 
 # トークンとか
 DISCORD_TOKEN: str = getenv("DISCORD_TOKEN")
@@ -50,9 +50,6 @@ bot = MyBot(command_prefix="!", intents=intents)
 
 main_log = get_log("Main")
 
-shutdown_event = asyncio.Event()
-bot_task = None
-
 Can_Stop = [
     6999,
     5355,
@@ -60,9 +57,6 @@ Can_Stop = [
     7549,
     2525
 ]
-
-def handle_sigterm():
-    shutdown_event.set()
 
 # Raspberry Pi Connectで^Cが使えないため
 async def console_input():
@@ -77,7 +71,6 @@ async def bot_stop():
     main_log.info("Stop.")
     await status_update("停止中")
     await bot.close()
-    await bot_task
 
 # グローバル変数
 supabase: AsyncClient = None
@@ -149,6 +142,28 @@ async def send_system_dm_message(dmid:str, message:str):
     except Exception as e:
         log.error(f"DMのシステムメッセージ送信中にエラーが発生しました。")
 
+queue = []
+
+async def post_task(data:dict):
+    global queue
+    log = get_log("post_task")
+    asyncio.sleep(data["second"])
+    content = data["content"] if "content" in data else None
+    reply_id = data["reply_id"] if "reply_id" in data else None
+    repost_id = data["repost_id"] if "repost_id" in data else None
+    attachments = data["attachments"] if "attachments" in data else None
+    mask = data["mask"]
+    await send_post(
+        content=content,
+        reply_id=reply_id,
+        repost_id=repost_id,
+        attachments=attachments,
+        mask=mask
+    )
+    queue.pop(0)
+    if len(queue) != 0:
+        await post_task(queue[0])
+
 async def send_post(content:str = None, reply_id:str = None, repost_id:str = None, attachments:list = None, mask:bool = False):
     """
     ポストをします。
@@ -160,6 +175,7 @@ async def send_post(content:str = None, reply_id:str = None, repost_id:str = Non
     Todo:
         * リポスト時の通知処理の移植
     """
+    global queue
     log = get_log("send_post")
     try:
         #ポストの送信
@@ -197,6 +213,24 @@ async def send_post(content:str = None, reply_id:str = None, repost_id:str = Non
         for id in mentioned_ids:
             await sendNotification(id, f"@{currentUser['id']}さんがあなたをメンションしました。", f"#post/{newPost['id']}")
     except Exception as e:
+        if "ポストの間隔が短いようです" in e.error["message"]:
+            if len(queue) == 0:
+                m = re.match(r'あと([0-9]+)秒お待ちください', e.error["message"])
+            else:
+                m = re.match(r'ポスト後([0-9]+)秒経過するまでポストできません', e.error["message"])
+            sec = m.group(1)
+            d = {"second":int(sec)}
+            if content:
+                d["content"] = content
+            if reply_id:
+                d["reply_id"] = reply_id
+            if repost_id:
+                d["repost_id"] = repost_id
+            if attachments:
+                d["attachments"] = attachments
+            d["mask"] = mask
+            queue.append(d)
+            asyncio.create_task(post_task())
         log.error(f"ポスト中にエラーが発生しました。\n{e}")
 
 async def get_hydrated_posts(ids:list, profile:bool = False) -> list[dict]:
@@ -539,11 +573,8 @@ async def main():
     Botメイン機構
     """
     log = main_log
-    global currentUser, supabase, session, bot_task
+    global currentUser, supabase, session
     try:
-        loop = asyncio.get_running_loop()
-        loop.add_signal_handler(signal.SIGTERM, handle_sigterm)
-        loop.add_signal_handler(signal.SIGINT, handle_sigterm)
         # Supabaseのログイン
         supabase, session = await sessions.get_supabase()
         # session = await supabase.auth.get_session()
@@ -588,11 +619,7 @@ async def main():
         #     callback=lambda payload: asyncio.create_task(handle_notification(payload))
         # )
 
-        bot_task = asyncio.create_task(bot.start(DISCORD_TOKEN))
-        await shutdown_event.wait()
-        log.info("SIGTERM reived. Shutting down...")
-        await bot_stop()
-        #await bot_task
+        await bot.start(DISCORD_TOKEN)
     except Exception as e:
         log.error(f"BOTの起動中にエラーが発生しました\n{e}")
 
