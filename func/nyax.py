@@ -207,8 +207,78 @@ class Post:
         await self.supabase.rpc("handle_star", {"p_post_id": self.id}).execute()
 
 class DM:
-    def __init__(self, dd:dict):
-        pass
+    def __init__(self, nc:NyaXClient, dd:dict):
+        self.nc:NyaXClient = nc
+        self.id:str = dd["id"] if "id" in dd else None
+        self.title:str = dd["title"] if "title" in dd else None
+        self.member:list[int] = dd["member"] if "member" in dd else None
+        self.time:str = dd["time"] if "time" in dd else None
+        posts:list[DM_Post] = []
+        if "post" in dd:
+            for pd in dd["post"]:
+                posts.append(DM_Post(pd))
+        self.post:list[DM_Post] = posts
+        self.host_id:int = dd["host_id"] if "host_id" in dd else None
+
+    async def send_dm_message(self, message:str):
+        """
+        DMにメッセージを送信します。
+        Args:
+            dmid (str): 送信するDMのID
+            message (str): メッセージ
+        """
+        log = get_log("send_dm_message")
+        try:
+            messagedict = {
+                "id": str(uuid.uuid4()),
+                "time": datetime.now(timezone.utc).isoformat(timespec="microseconds"),
+                "userid": self.currentUser.id,
+                "content": crlf(message),
+                "attachments": [],
+                "read": [self.nc.currentUser.id]
+            }
+            await self.nc.supabase.rpc("append_to_dm_post", {
+                "dm_id_in": self.id,
+                "new_message_in": messagedict
+            }).execute()
+        except Exception as e:
+            log.error(f"DMのメッセージ送信中にエラーが発生しました。\n{e}")
+
+    async def send_system_dm_message(self, message:str):
+        """
+        DMにシステムメッセージを送信します。
+        Args:
+            dmid (str): 送信するDMのID
+            message (str): メッセージ
+        """
+        log = get_log("send_system_dm_message")
+        try:
+            messagedict = {
+                "id": str(uuid.uuid4()),
+                "time": datetime.now(timezone.utc).isoformat(timespec="microseconds"),
+                "type": "system",
+                "content": crlf(message)
+            }
+            await self.nc.supabase.rpc("append_to_dm_post", {
+                "dm_id_in": self.id,
+                "new_message_in": messagedict
+            }).execute()
+        except Exception as e:
+            log.error(f"DMのシステムメッセージ送信中にエラーが発生しました。")
+
+class DM_Post:
+    def __init__(self, dd:dict) -> None:
+        attachments:list[Attachment] = []
+        if "attachments" in dd:
+            for ad in dd["attachments"]:
+                attachments.append(Attachment(ad))
+        self.attachments:list[Attachment] = attachments
+        self.content:str = dd["content"] if "content" in dd else None
+        self.id:str = dd["id"] if "id" in dd else None
+        self.read:list[int] = dd["read"] if "read" in dd else None
+        self.time:str = dd["time"] if "time" in dd else None
+        self.dtime:datetime = datetime.fromisoformat(dd["time"])
+        self.userid:int = dd["userid"] if "userid" in dd else None
 
 class NyaXClient:
     async def __init__(self, supabase_url:str, supabase_token:str, scid:str, scpass:str, session_path:str = "sessions.json"):
@@ -251,51 +321,6 @@ class NyaXClient:
             )
         except Exception as e:
             log.error(f"通知の送信中にエラーが発生しました。\n{e}")
-    async def send_dm_message(self, dmid:str,message:str):
-        """
-        DMにメッセージを送信します。
-        Args:
-            dmid (str): 送信するDMのID
-            message (str): メッセージ
-        """
-        log = get_log("send_dm_message")
-        try:
-            messagedict = {
-                "id": str(uuid.uuid4()),
-                "time": datetime.now(timezone.utc).isoformat(timespec="microseconds"),
-                "userid": self.currentUser.id,
-                "content": crlf(message),
-                "attachments": [],
-                "read": [self.currentUser.id]
-            }
-            await self.supabase.rpc("append_to_dm_post", {
-                "dm_id_in": dmid,
-                "new_message_in": messagedict
-            }).execute()
-        except Exception as e:
-            log.error(f"DMのメッセージ送信中にエラーが発生しました。\n{e}")
-
-    async def send_system_dm_message(self, dmid:str, message:str):
-        """
-        DMにシステムメッセージを送信します。
-        Args:
-            dmid (str): 送信するDMのID
-            message (str): メッセージ
-        """
-        log = get_log("send_system_dm_message")
-        try:
-            messagedict = {
-                "id": str(uuid.uuid4()),
-                "time": datetime.now(timezone.utc).isoformat(timespec="microseconds"),
-                "type": "system",
-                "content": crlf(message)
-            }
-            await self.supabase.rpc("append_to_dm_post", {
-                "dm_id_in": dmid,
-                "new_message_in": messagedict
-            }).execute()
-        except Exception as e:
-            log.error(f"DMのシステムメッセージ送信中にエラーが発生しました。")
 
     async def send_post(self, content:str = None, reply_id:str = None, repost_id:str = None, attachments:list = None, mask:bool = False):
         """
@@ -405,8 +430,16 @@ class NyaXClient:
             if "error" in res_data:
                 raise
 
-    async def get_dm_list(self):
+    async def get_dm_list(self) -> list[DM]:
         response = (
             await self.supabase.table("dm")
             .select("id, title, member,time")
-        )
+            .contains("member", [self.currentUser.id])
+            .order("time", desc=True)
+            .execute()
+        ).data
+        dms:list[DM] = []
+        for i in response:
+            dms.append(DM(self, i))
+        return dms
+
