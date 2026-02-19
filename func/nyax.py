@@ -11,7 +11,12 @@ from func.other import crlf
 from enum import Enum, auto
 import uuid
 import aiohttp
+import json
+import regex as re
 load_dotenv()
+
+class FileUploadException(Exception):
+    pass
 
 class Setting_Data:
     def __init__(self, sd:dict):
@@ -23,7 +28,7 @@ class Setting_Data:
         self.show_trust_label:bool = sd["show_trust_label"]
         self.default_timeline_tab:Literal["all", "foryou", "following"] = sd["show_trust_label"]
         self.emoji:Literal["twemoji", "emojione", "default"] = sd["emoji"]
-        self.theme:literal["auto", "light", "dark"] = sd["theme"]
+        self.theme:Literal["auto", "light", "dark"] = sd["theme"]
     def get_dict(self):
         return vars(self)
     def change(self, key:str, value:Union[str,bool]):
@@ -119,7 +124,7 @@ class CurrentUser:
         }
         response = (
             await self.supabase.table("user")
-            .update(updatedData)
+            .update(updateData)
             .eq("id", self.id)
             .execute()
         ).data
@@ -135,7 +140,7 @@ class CurrentUser:
         }
         response = (
             await self.supabase.table("user")
-            .update(updatedData)
+            .update(updateData)
             .eq("id", self.id)
             .execute()
         ).data
@@ -151,47 +156,11 @@ class CurrentUser:
         }
         response = (
             await self.supabase.table("user")
-            .update(updatedData)
+            .update(updateData)
             .eq("id", self.id)
             .execute()
         ).data
-        self.me = new_me
         return response
-
-class User:
-    def __init__(self, client:NyaXClient, cd:dict):
-        self.nc:NyaXClient = client
-        self.supabase: AsyncClient = client.supabase
-        notices:list[Notice] = []
-        if "notice" in cd:
-            for i in cd["notice"]:
-                notices.append(Notice(i))
-        self.id:int = cd["id"] if "id" in cd else None
-        self.uuid:str = cd["uuid"] if "uuid" in cd else None
-        self.scid:str = cd["scid"] if "scid" in cd else None
-        self.name:str = cd["name"] if "name" in cd else None
-        self.me:str = cd["me"] if "me" in cd else None
-        self.icon_data:str = cd["icon_data"] if "icon_data" in cd else None
-        self.settings:Setting_Data = Setting_Data(cd["settings"]) if "settings" in cd else None
-        self.like:list[str] = cd["like"] if "like" in cd else None
-        self.star:list[str] = cd["star"] if "star" in cd else None
-        self.follow:list[int] = cd["follow"] if "follow" in cd else None
-        self.admin:bool = cd["admin"] if "admin" in cd else None
-        self.verify:bool = cd["verify"] if "verify" in cd else None
-        self.freeze = cd["frieze"] if "frieze" in cd else None
-        self.notice:list[Notice] = notices
-        self.notice_count:int = cd["notice_count"] if "notice_count" in cd else None
-        self.time:str = cd["time"] if "time" in cd else None
-        self.dtime:datetime = datetime.fromisoformat(cd["time"]) if "time" in cd else None
-        self.block:list[int] = cd["block"] if "block" in cd else None
-        self.pin:str = cd["pin"] if "pin" in cd else None
-    async def all_get(self):
-        user_req = (
-            self.nc.table("user")
-            .select("*")
-        )
-        if self.id != None:
-            
 
 class Attachment:
     def __init__(self, ad:dict):
@@ -255,10 +224,10 @@ class NyaXClient:
         self.supabase_url:str = supabase_url
         self.supabase_token:str = supabase_token
         self.sessions:Sessions = Sessions(session_path)
-        supabase, session = await sessions.get_supabase()
+        supabase, session = await self.sessions.get_supabase()
         self.supabase:AsyncClient = supabase
         self.session = session
-        self.currentUser = CurrentUser(self, await sessions.get_currentUser(supabase, session))
+        self.currentUser = CurrentUser(self, await self.sessions.get_currentUser(supabase, session))
 
     async def sendNotification(self, recipientId:str, message:str, openHash:str=""):
         """
@@ -270,7 +239,7 @@ class NyaXClient:
         """
         log = get_log("sendNotification")
         try:
-            if(not self.currentUser or not recipientId or not message or recipientId == currentUser.id):
+            if(not self.currentUser or not recipientId or not message or recipientId == self.currentUser.id):
                 return
             response = (
                 await self.supabase.rpc("send_notification_with_timestamp", {
@@ -299,7 +268,7 @@ class NyaXClient:
                 "attachments": [],
                 "read": [self.currentUser.id]
             }
-            await supabase.rpc("append_to_dm_post", {
+            await self.supabase.rpc("append_to_dm_post", {
                 "dm_id_in": dmid,
                 "new_message_in": messagedict
             }).execute()
@@ -321,14 +290,14 @@ class NyaXClient:
                 "type": "system",
                 "content": crlf(message)
             }
-            await supabase.rpc("append_to_dm_post", {
+            await self.supabase.rpc("append_to_dm_post", {
                 "dm_id_in": dmid,
                 "new_message_in": messagedict
             }).execute()
         except Exception as e:
             log.error(f"DMのシステムメッセージ送信中にエラーが発生しました。")
 
-    async def send_post(content:str = None, reply_id:str = None, repost_id:str = None, attachments:list = None, mask:bool = False):
+    async def send_post(self, content:str = None, reply_id:str = None, repost_id:str = None, attachments:list = None, mask:bool = False):
         """
         ポストをします。
         Args:
@@ -367,7 +336,7 @@ class NyaXClient:
                 log.debug(parentPost)
                 if(parentPost and parentPost["userid"] != self.currentUser.id):
                     replied_user_id = parentPost["userid"]
-                    await sendNotification(replied_user_id, f"@{self.currentUser.id}さんがあなたのポストに返信しました。", f"#post/{newPost['id']}")
+                    await self.sendNotification(replied_user_id, f"@{self.currentUser.id}さんがあなたのポストに返信しました。", f"#post/{newPost['id']}")
             #メンションの通知送信
             mentioned_ids = set()
             for match in re.finditer(r"@(\d+)", content):
@@ -375,7 +344,7 @@ class NyaXClient:
                 if(mentioned_id != self.currentUser.id and mentioned_id != replied_user_id):
                     mentioned_ids.add(mentioned_id)
             for id in mentioned_ids:
-                await sendNotification(id, f"@{self.currentUser.id}さんがあなたをメンションしました。", f"#post/{newPost['id']}")
+                await self.sendNotification(id, f"@{self.currentUser.id}さんがあなたをメンションしました。", f"#post/{newPost['id']}")
             return Post(self, newPost)
         except Exception as e:
             log.error(f"ポスト中にエラーが発生しました。\n{e}")
@@ -391,8 +360,8 @@ class NyaXClient:
             async with aiohttp.ClientSession() as a_session:
                 async with a_session.post(
                     f"{self.supabase_url}/rest/v1/rpc/get_hydrated_posts",
-                    headers={
-                        "apikey": self.supabase_token
+                    headers = {
+                        "apikey": self.supabase_token,
                         "Authorization": f"Bearer {self.supabase_token}",
                         "Content-Type": "application/json",
                         "Content-Profile": "public",
@@ -415,13 +384,13 @@ class NyaXClient:
 
     async def get_notifications(self) -> list[Notice]:
         response = (
-            await.supabase.table("user")
+            await self.supabase.table("user")
             .select("notice")
             .eq("id", self.currentUser.id)
             .execute()
         )
         res = response.data[0]
-        notices = result["notice"]
+        notices = res["notice"]
         notices2:list[Notice] = []
         for i in notices:
             notices2.append(Notice(i if type(i) is dict else {"id": uuid.uuid4(), "message": i, "open": "", "click": True}))
@@ -429,16 +398,15 @@ class NyaXClient:
     async def uploadFileViaEdgeFunction(self, file):
         async with aiohttp.ClientSession() as a_session:
             formData = aiohttp.FormData()
-            data.add_field("file", file)
-            async with a_session.post(f"{self.nc}")
+            formData.add_field("file", file)
+            async with a_session.post(f"{self.supabase_url.replace(".supabase.co", ".functions.supabase.co")}/upload-file") as resp:
+                result = await resp.json()
+            res_data = result["data"] if "data" in result else result
+            if "error" in res_data:
+                raise
+
     async def get_dm_list(self):
         response = (
-            await supabase.table("dm")
+            await self.supabase.table("dm")
             .select("id, title, member,time")
-            .contains("member", [self.currentUser.id])
-            .order("time", { "ascending": False });
-            .execute()
-        ).data
-        if "error" in response:
-            raise Exception(response)
-        
+        )
