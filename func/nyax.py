@@ -87,34 +87,57 @@ class Notice:
             self.type = NOTICETYPE.INVITE_DM
         elif "NyaXTeam" in nd["message"]:
             self.type = NOTICETYPE.NYAXTEAM
-            
 
-class CurrentUser:
+class User:
     def __init__(self, client:NyaXClient, cd:dict):
         self.nc:NyaXClient = client
         self.supabase: AsyncClient = client.supabase
         notices:list[Notice] = []
-        for i in cd["notice"]:
-            notices.append(Notice(i))
-        self.id:int = cd["id"]
-        self.uuid:str = cd["uuid"]
-        self.scid:str = cd["scid"]
-        self.name:str = cd["name"]
-        self.me:str = cd["me"]
-        self.icon_data:str = cd["icon_data"]
-        self.settings:Setting_Data = Setting_Data(cd["settings"])
-        self.like:list[str] = cd["like"]
-        self.star:list[str] = cd["star"]
-        self.follow:list[int] = cd["follow"]
-        self.admin:bool = cd["admin"]
-        self.verify:bool = cd["verify"]
-        self.freeze = cd["frieze"]
+        if "notice" in cd:
+            for i in cd["notice"]:
+                notices.append(Notice(i))
+        self.id:int = cd["id"] if "id" in cd else None
+        self.uuid:str = cd["uuid"] if "uuid" in cd else None
+        self.scid:str = cd["scid"] if "scid" in cd else None
+        self.name:str = cd["name"] if "name" in cd else None
+        self.me:str = cd["me"] if "me" in cd else None
+        self.icon_data:str = cd["icon_data"] if "icon_data" in cd else None
+        self.settings:Setting_Data = Setting_Data(cd["settings"]) if "settings" in cd else None
+        self.like:list[str] = cd["like"] if "like" in cd else None
+        self.star:list[str] = cd["star"] if "star" in cd else None
+        self.follow:list[int] = cd["follow"] if "follow" in cd else None
+        self.admin:bool = cd["admin"] if "admin" in cd else None
+        self.verify:bool = cd["verify"] if "verify" in cd else None
+        self.freeze = cd["frieze"] if "frieze" in cd else None
         self.notice:list[Notice] = notices
-        self.notice_count:int = cd["notice_count"]
-        self.time:str = cd["time"]
-        self.dtime:datetime = datetime.fromisoformat(cd["time"])
-        self.block:list[int] = cd["block"]
-        self.pin:str = cd["pin"]
+        self.notice_count:int = cd["notice_count"] if "notice_count" in cd else None
+        self.time:str = cd["time"] if "time" in cd else None
+        self.dtime:datetime = datetime.fromisoformat(cd["time"]) if "time" in cd else None
+        self.block:list[int] = cd["block"] if "block" in cd else None
+        self.pin:str = cd["pin"] if "pin" in cd else None
+    async def all_load(self):
+        user_req = (
+            self.nc.supabase.table("user")
+            .select("*")
+        )
+        if self.id != None:
+            req = (
+                await user_req
+                .eq("id", self.id)
+                .single()
+                .execute()
+            ).data
+            self.__init__(self.nc, req)
+        elif self.uuid != None:
+            req = (
+                await user_req
+                .eq("uuid", self.uuid)
+                .single()
+                .execute()
+            ).data
+            self.__init__(self.nc, req)
+
+class CurrentUser(User):
     async def change_name(self, new_name:str):
         updateData:dict[str, Any] = {
             "name": new_name,
