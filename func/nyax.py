@@ -136,6 +136,8 @@ class User:
                 .execute()
             ).data
             self.__init__(self.nc, req)
+    #async def get_followers(self, limit:int = 30, offset:int = 0):
+
 
 class CurrentUser(User):
     async def change_name(self, new_name:str):
@@ -385,6 +387,22 @@ class NyaXClient:
                 if(parentPost and parentPost["userid"] != self.currentUser.id):
                     replied_user_id = parentPost["userid"]
                     await self.sendNotification(replied_user_id, f"@{self.currentUser.id}さんがあなたのポストに返信しました。", f"#post/{newPost['id']}")
+            if(repost_id):
+                parentPost = (
+                    await self.supabase.table("post")
+                    .select("userid")
+                    .eq("id", reply_id)
+                    .single()
+                    .execute()
+                ).data
+                log.debug(parentPost)
+                if(parentPost and parentPost["userid"] != self.currentUser.id):
+                    replied_user_id = parentPost["userid"]
+                    if(content or attachments):
+                        await self.sendNotification(replied_user_id, f"@{self.currentUser.id}さんがあなたのポストを引用しました。", f"#post/{newPost['id']}")
+                    else:
+                        await self.sendNotification(replied_user_id, f"@{self.currentUser.id}さんがあなたポストをリポストしました。", f"#post/{newPost['id']}")
+                    
             #メンションの通知送信
             mentioned_ids = set()
             for match in re.finditer(r"@(\d+)", content):
