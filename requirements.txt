@@ -30,7 +30,7 @@ hyperframe==6.1.0
 idna==3.11
 multidict==6.7.0
 packaging==25.0
-pillow==12.1.1
+pillow==12.2.0
 postgrest==2.25.0
 propcache==0.4.1
 pycparser==2.23
