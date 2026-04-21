@@ -37,7 +37,7 @@ pycparser==2.23
 pydantic==2.12.5
 pydantic_core==2.41.5
 PyJWT==2.10.1
-python-dotenv==1.2.1
+python-dotenv==1.2.2
 realtime==2.27.2
 regex==2026.1.15
 scapi==3.1.4
